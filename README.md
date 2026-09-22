@@ -15,14 +15,17 @@ React/TypeScript frontend).
 
 ## Features
 
-- Open and scroll multi-GB raw CSV files without loading them into RAM
+- Open and scroll multi-GB raw CSV/TSV files without loading them into RAM
 - Drag-and-drop CSV/TSV files directly into the window to open
 - Full-text search (find next/previous) across the whole file
 - Goto a specific row/column
 - Edit cells in place; overflowing content auto-scrolls into view
 - Undo/redo (including whole-paste undo in one step)
 - Multi-cell select, copy, and paste (TSV, compatible with spreadsheet apps)
-- Save writes back the raw CSV, untouched except for your edits
+- TSV & automatic delimiter detection (comma, tab, semicolon, pipe)
+- Multi-encoding support (UTF-8, Shift-JIS, Windows-1252, etc.) with live switching
+- Interactive status bar to switch delimiter, encoding, and line endings
+- Save writes back the raw file, untouched except for your edits
 
 ## Download
 
@@ -60,6 +63,10 @@ cargo test --manifest-path src-tauri/Cargo.toml
 npm test
 ```
 
+## Author
+
+Developed and maintained by **[AM Software](https://amsoftware.com.vn)**.
+
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+MIT License © 2026 **AM Software** — see [LICENSE](./LICENSE) for details.

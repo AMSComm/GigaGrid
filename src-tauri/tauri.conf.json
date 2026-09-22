@@ -24,8 +24,8 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "publisher": "Doãn Huy",
-    "copyright": "Copyright © 2026 Doãn Huy",
+    "publisher": "AM Software",
+    "copyright": "Copyright © 2026 AM Software",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

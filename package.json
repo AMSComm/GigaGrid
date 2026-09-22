@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.3.0",
   "description": "Cross-platform desktop CSV/TSV editor for GB-scale files",
-  "author": "Doãn Huy",
+  "author": "AM Software",
   "license": "MIT",
   "type": "module",
   "scripts": {

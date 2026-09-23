@@ -2,6 +2,17 @@
 
 All notable changes to **Gigagrid** will be documented in this file.
 
+## [v0.3.1] - 2026-09-23
+
+### ⚙️ Architecture & Standardization
+- **Modern Package Management**: Migrated from npm to `pnpm 11.0.9` with deterministic lockfile.
+- **Core Ecosystem Upgrade**: Upgraded React to `^19.2.8` (React 19.3 runtime), Tauri core to `^2.11.1`, and `@tauri-apps/plugin-updater` to `^2.12.0`.
+- **High-Speed Linting**: Integrated Oxlint (`^1.81.0`) with automated validation steps across local scripts and GitHub Actions workflows.
+- **CI/CD Alignment**: Synchronized GitHub Actions release and quality workflows with frozen lockfile support and automated release notes synchronization.
+- **Licensing & Identity**: Standardized MIT License attribution to AM Software.
+
+---
+
 ## [v0.3.0] - 2026-09-22
 
 ### 🚀 Features & Enhancements

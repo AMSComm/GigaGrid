@@ -29,19 +29,27 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.0.9
+          run_install: false
 
       - name: Install frontend dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
+
+      - name: Frontend lint
+        run: pnpm run lint
+
+      - name: Frontend tests
+        run: pnpm test
+
+      - name: Frontend build
+        run: pnpm run build
 
       - name: Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
-
-      - name: Frontend tests
-        run: npm test
-
-      - name: Frontend build
-        run: npm run build
 
       - name: Rust build
         run: cargo build --manifest-path src-tauri/Cargo.toml

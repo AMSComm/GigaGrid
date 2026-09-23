@@ -3,9 +3,9 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { ask, message, open } from "@tauri-apps/plugin-dialog";
-import { check as checkForUpdate, type Update } from "@tauri-apps/plugin-updater";
-import { relaunch } from "@tauri-apps/plugin-process";
+import { ask, open } from "@tauri-apps/plugin-dialog";
+import { UpdateDialog } from "./components/UpdateDialog";
+import { checkForAppUpdates } from "./utils/updater";
 import { Grid, type GridHandle } from "./components/Grid";
 import { Toolbar } from "./components/Toolbar";
 import { SearchPanel, type SearchPanelHandle } from "./components/SearchPanel";
@@ -48,7 +48,8 @@ function App() {
   const [activeTabId, setActiveTabId] = useState<number | null>(null);
   const [openError, setOpenError] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings>(() => loadSettings());
-  const [updateBusy, setUpdateBusy] = useState(false);
+  const [showUpdateDialog, setShowUpdateDialog] = useState(false);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
   const [showRecent, setShowRecent] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -284,50 +285,19 @@ function App() {
     });
   }
 
-  async function checkAndPromptUpdate(silent: boolean) {
-    let update: Update | null;
-    try {
-      update = await checkForUpdate();
-    } catch (e) {
-      if (!silent) setOpenError(`Check for update failed: ${e}`);
-      return;
-    }
-    if (!update) {
-      if (!silent) {
-        await message("Gigagrid is already up to date.", {
-          title: "Gigagrid",
-          kind: "info",
-        });
-      }
-      return;
-    }
-    const notes = update.body ? `\n\n${update.body}` : "";
-    const ok = await ask(
-      `A new update is available: v${update.version}${notes}\n\nDownload and install now? The app will restart.`,
-      {
-        title: "Update Available",
-        kind: "info",
-        okLabel: "Update",
-        cancelLabel: "Later",
-      },
-    );
-    if (!ok) return;
-    setUpdateBusy(true);
-    try {
-      await update.downloadAndInstall();
-      await relaunch();
-    } catch (e) {
-      setUpdateBusy(false);
-      setOpenError(`Update failed: ${e}`);
-    }
-  }
-
-  // Silent on startup — a missing network / GitHub being briefly unreachable
-  // shouldn't nag the user every launch; the toolbar button covers the
-  // explicit "check now" case and surfaces its own errors.
+  // Silent on startup — check for updates in the background without nagging
   useEffect(() => {
-    checkAndPromptUpdate(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let active = true;
+    checkForAppUpdates()
+      .then((res) => {
+        if (active && res.available) {
+          setUpdateAvailable(true);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
   }, []);
 
   function cycleTheme() {
@@ -712,11 +682,24 @@ function App() {
           </button>
           <button
             className="icon-btn"
-            title={updateBusy ? "Updating…" : "Check for updates"}
-            onClick={() => checkAndPromptUpdate(false)}
-            disabled={updateBusy}
+            style={{ position: "relative" }}
+            title={updateAvailable ? "Update available! Click to view" : "Check for updates"}
+            onClick={() => setShowUpdateDialog(true)}
           >
             <IconDownload />
+            {updateAvailable && (
+              <span
+                style={{
+                  position: "absolute",
+                  top: 4,
+                  right: 4,
+                  width: 6,
+                  height: 6,
+                  borderRadius: "50%",
+                  backgroundColor: "var(--primary)",
+                }}
+              />
+            )}
           </button>
         </div>
       </div>
@@ -829,6 +812,10 @@ function App() {
           </div>
         </div>
       )}
+      <UpdateDialog
+        isOpen={showUpdateDialog}
+        onClose={() => setShowUpdateDialog(false)}
+      />
     </main>
   );
 }

@@ -216,3 +216,243 @@ button {
   border-color: var(--border);
 }
 
+/* Update Dialog */
+.update-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+  user-select: none;
+}
+
+.update-dialog-container {
+  width: 480px;
+  max-width: 90vw;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.32);
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  animation: dialog-pop 0.15s ease-out;
+}
+
+@keyframes dialog-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.update-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.update-dialog-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.update-dialog-icon-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: rgba(57, 108, 216, 0.12);
+  border: 1px solid rgba(57, 108, 216, 0.25);
+  color: var(--primary);
+}
+
+.update-dialog-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.update-dialog-subtitle {
+  margin: 2px 0 0 0;
+  font-size: 11px;
+  color: #888;
+}
+
+.update-dialog-body {
+  padding: 16px 0;
+}
+
+.update-dialog-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(57, 108, 216, 0.08);
+  border: 1px solid rgba(57, 108, 216, 0.25);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
+.update-dialog-badge {
+  background: var(--primary);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 3px;
+  padding: 2px 6px;
+}
+
+.update-dialog-notes {
+  max-height: 150px;
+  overflow-y: auto;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  margin-top: 10px;
+  color: var(--fg);
+}
+
+.update-dialog-progress-bar {
+  height: 6px;
+  width: 100%;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 6px;
+}
+
+.update-dialog-progress-fill {
+  height: 100%;
+  background: var(--primary);
+  transition: width 0.2s ease;
+}
+
+.update-dialog-alert-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: rgba(217, 48, 37, 0.08);
+  border: 1px solid rgba(217, 48, 37, 0.3);
+  border-radius: 6px;
+  padding: 10px 12px;
+  color: #d93025;
+  font-size: 12px;
+}
+
+.update-dialog-alert-success {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(30, 126, 52, 0.08);
+  border: 1px solid rgba(30, 126, 52, 0.3);
+  border-radius: 6px;
+  padding: 10px 12px;
+  color: #1e7e34;
+  font-size: 12px;
+}
+
+.update-dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.btn-primary {
+  background: var(--primary);
+  color: #ffffff;
+  border: 1px solid var(--primary);
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+
+.btn-primary:hover {
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
+}
+
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--border);
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+
+.btn-secondary:hover {
+  background: rgba(128, 128, 128, 0.15);
+  border-color: var(--border);
+}
+
+.btn-link {
+  background: transparent;
+  border: none;
+  color: #888;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+
+.btn-link:hover {
+  color: var(--fg);
+}
+
+.btn-link:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spin-icon {
+  animation: spin 1s linear infinite;
+}
+
+

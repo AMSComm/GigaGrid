@@ -2,6 +2,15 @@
 
 All notable changes to **Gigagrid** will be documented in this file.
 
+## [v0.4.0] - 2026-09-24
+
+### 🚀 Features & Enhancements
+- **Multi-Criteria Filter Popover**: Replaced the single inline filter text input with a dedicated Filter button and Popover dropdown. Supports filtering by a specific column or all columns, combined with AND logic and case-insensitive matching.
+- **Selection Statistics (Count & Sum)**: Enhanced status bar selection readout displaying selected cells, rows, and columns, with automatic calculation of Count and Sum for numeric cells.
+- **High-Performance Hybrid Calculation**: Zero-latency instant JavaScript calculation for visible/cached rows, and debounced asynchronous Rust core evaluation (`get_selection_stats`) for large/GB-scale selections without UI lag.
+
+---
+
 ## [v0.3.1] - 2026-09-23
 
 ### ⚙️ Architecture & Standardization

@@ -1,5 +1,27 @@
 import { describe, expect, it } from "vitest";
-import { computeWindow, fetchRowsInChunks } from "./Grid";
+import { computeGutterWidth, computeWindow, fetchRowsInChunks, MIN_GUTTER_WIDTH } from "./Grid";
+
+describe("computeGutterWidth", () => {
+  it("returns MIN_GUTTER_WIDTH for empty or small row counts", () => {
+    expect(computeGutterWidth(0)).toBe(MIN_GUTTER_WIDTH);
+    expect(computeGutterWidth(-5)).toBe(MIN_GUTTER_WIDTH);
+    expect(computeGutterWidth(10)).toBe(MIN_GUTTER_WIDTH);
+    expect(computeGutterWidth(50)).toBe(MIN_GUTTER_WIDTH);
+    expect(computeGutterWidth(999)).toBe(MIN_GUTTER_WIDTH);
+  });
+
+  it("scales dynamically for large datasets to prevent header misalignment", () => {
+    // 5-digit row counts: e.g. 50,000 rows
+    expect(computeGutterWidth(50000)).toBeGreaterThanOrEqual(60);
+    // 6-digit row counts: e.g. 200k, 500k rows
+    expect(computeGutterWidth(200000)).toBe(76);
+    expect(computeGutterWidth(500000)).toBe(76);
+    // 7-digit row counts: 1,000,000 rows
+    expect(computeGutterWidth(1000000)).toBe(86);
+    // 8-digit row counts: 10,000,000 rows
+    expect(computeGutterWidth(10000000)).toBe(96);
+  });
+});
 
 describe("computeWindow", () => {
   it("returns empty range for an empty file", () => {

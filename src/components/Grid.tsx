@@ -7,7 +7,20 @@ const ROW_HEIGHT = 28;
 const OVERSCAN = 10;
 const FETCH_DEBOUNCE_MS = 50;
 const MAX_CACHE_ROWS = 20000;
-const GUTTER_WIDTH = 48;
+export const MIN_GUTTER_WIDTH = 48;
+
+/**
+ * Computes the row-number gutter width based on total row count.
+ * Scales dynamically to ensure large row numbers (e.g. 500k, 1M+ rows)
+ * fit with comfortable padding and never cause column headers to misalign.
+ */
+export function computeGutterWidth(rowCount: number): number {
+  if (rowCount <= 0) return MIN_GUTTER_WIDTH;
+  const digits = String(rowCount).length;
+  const needed = digits * 10 + 16;
+  return Math.max(MIN_GUTTER_WIDTH, needed);
+}
+
 const HEADER_HEIGHT = ROW_HEIGHT;
 const MIN_ROW_HEIGHT = 18;
 const MIN_COL_WIDTH = 40;
@@ -114,6 +127,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({ tabId, row
   const [editingCell, setEditingCell] = useState<CellPos | null>(null);
   const [rowHeight, setRowHeight] = useState(ROW_HEIGHT);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const gutterWidth = computeGutterWidth(rowCount);
   // Bumped by invalidateCache() and included in both fetch effects' own
   // dependency arrays below — those arrays deliberately track `range`/
   // `rowCount`/`freezeHeader` only (see the eslint-disable on each), which
@@ -243,7 +257,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({ tabId, row
       el.scrollTop = rowBottom - el.clientHeight;
     }
 
-    const leftCover = showGridChrome ? GUTTER_WIDTH : 0;
+    const leftCover = showGridChrome ? gutterWidth : 0;
     let colLeft = leftCover;
     for (let c = 0; c < col; c++) colLeft += colWidths[c] ?? DEFAULT_COL_WIDTH;
     const colRight = colLeft + (colWidths[col] ?? DEFAULT_COL_WIDTH);
@@ -777,7 +791,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({ tabId, row
   const frozenRow = freezeHeader ? rowsByIndex.get(0) : undefined;
 
   function frozenLeft(ci: number): number {
-    const leftCover = showGridChrome ? GUTTER_WIDTH : 0;
+    const leftCover = showGridChrome ? gutterWidth : 0;
     let left = leftCover;
     for (let c = 0; c < ci; c++) left += colWidths[c] ?? DEFAULT_COL_WIDTH;
     return left;
@@ -809,7 +823,10 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({ tabId, row
               left: 0,
               zIndex: 4,
               flexShrink: 0,
-              minWidth: GUTTER_WIDTH,
+              width: gutterWidth,
+              minWidth: gutterWidth,
+              maxWidth: gutterWidth,
+              boxSizing: "border-box",
               height: HEADER_HEIGHT,
               background: "var(--header-bg)",
               ...chromeBorder,
@@ -879,7 +896,10 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({ tabId, row
                 left: 0,
                 zIndex: 4,
                 flexShrink: 0,
-              minWidth: GUTTER_WIDTH,
+                width: gutterWidth,
+                minWidth: gutterWidth,
+                maxWidth: gutterWidth,
+                boxSizing: "border-box",
                 background: "var(--header-bg)",
                 display: "flex",
                 alignItems: "center",
@@ -950,7 +970,14 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({ tabId, row
                     left: 0,
                     zIndex: 2,
                     flexShrink: 0,
-                    minWidth: GUTTER_WIDTH,
+                    width: gutterWidth,
+                    minWidth: gutterWidth,
+                    maxWidth: gutterWidth,
+                    boxSizing: "border-box",
+                    padding: "0 4px",
+                    overflow: "hidden",
+                    whiteSpace: "nowrap",
+                    textOverflow: "ellipsis",
                     background: "var(--header-bg)",
                     display: "flex",
                     alignItems: "center",

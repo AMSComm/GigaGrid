@@ -1,6 +1,6 @@
 [package]
 name = "gigagrid-core"
-version = "0.4.0"
+version = "0.4.1"
 description = "Cross-platform desktop CSV/TSV editor for GB-scale files"
 authors = ["AM Software"]
 edition = "2021"

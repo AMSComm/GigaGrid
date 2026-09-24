@@ -2,6 +2,15 @@
 
 All notable changes to **Gigagrid** will be documented in this file.
 
+## [v0.4.1] - 2026-09-24
+
+### 🐛 Bug Fixes
+- **Filter Popover Alignment & Overflow**: Aligned the multi-criteria filter popover to the right edge expanding towards the left (`right: 0`), preventing viewport boundary overflow and eliminating unwanted horizontal and vertical window-level scrollbars.
+- **Responsive Sizing**: Adjusted filter criteria column selection width (`100px`) and search input (`minWidth: 0, flex: 1`) with bounds capping (`maxWidth: min(320px, calc(100vw - 24px))`) to ensure clean rendering across all window resolutions.
+- **Window Scroll Guard**: Pinned `overflow: hidden` on root `html, body` to maintain strict desktop application viewport boundaries.
+
+---
+
 ## [v0.4.0] - 2026-09-24
 
 ### 🚀 Features & Enhancements

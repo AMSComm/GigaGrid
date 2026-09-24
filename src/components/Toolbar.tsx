@@ -138,17 +138,19 @@ export function Toolbar({
             style={{
               position: "absolute",
               top: "calc(100% + 4px)",
-              left: 0,
+              right: 0,
               zIndex: 50,
               display: "flex",
               flexDirection: "column",
-              minWidth: 320,
+              width: 300,
+              maxWidth: "min(320px, calc(100vw - 24px))",
               background: "var(--bg)",
               border: "1px solid var(--border)",
               borderRadius: 6,
               boxShadow: "0 4px 16px rgba(0,0,0,0.18)",
               padding: 10,
               gap: 8,
+              boxSizing: "border-box",
             }}
           >
             <div
@@ -187,13 +189,15 @@ export function Toolbar({
                       })
                     }
                     style={{
-                      width: 110,
+                      width: 100,
+                      flexShrink: 0,
                       fontSize: 12,
                       padding: "3px 4px",
                       borderRadius: 4,
                       border: "1px solid var(--border)",
                       background: "var(--bg)",
                       color: "var(--fg)",
+                      boxSizing: "border-box",
                     }}
                   >
                     <option value="all">All Columns</option>
@@ -217,13 +221,14 @@ export function Toolbar({
                     }}
                     style={{
                       flex: 1,
-                      minWidth: 120,
+                      minWidth: 0,
                       fontSize: 12,
                       padding: "3px 6px",
                       borderRadius: 4,
                       border: "1px solid var(--border)",
                       background: "var(--bg)",
                       color: "var(--fg)",
+                      boxSizing: "border-box",
                     }}
                   />
                   {filterRules.length > 1 && (

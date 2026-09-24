@@ -601,7 +601,9 @@ function App() {
         {activeTab && (
           <div style={{ display: "flex", gap: 4, alignItems: "center", flexShrink: 0 }}>
             <Toolbar
+              key={activeTab.meta.tab_id}
               tabId={activeTab.meta.tab_id}
+              totalCols={activeTab.stats.totalCols}
               visible={showSearch}
               onNavigate={(row, col) => handleNavigateFor(activeTab.meta.tab_id, row, col)}
               onToggleSearch={toggleSearch}

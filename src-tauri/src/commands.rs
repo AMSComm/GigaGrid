@@ -34,7 +34,7 @@ pub struct OpenFile {
     pub overlay: Overlay,
     pub view: Option<Vec<usize>>,
     pub sort_col: Option<usize>,
-    pub filter: Option<String>,
+    pub filters: Vec<crate::search::FilterCriterion>,
 }
 
 #[derive(serde::Serialize)]
@@ -90,7 +90,7 @@ pub fn open_file(
         overlay: Overlay::new(row_count, col_count),
         view: None,
         sort_col: None,
-        filter: None,
+        filters: Vec::new(),
     });
     Ok(FileMeta { tab_id, path, row_count, format, encoding, line_ending })
 }
@@ -142,7 +142,7 @@ fn view_len(open_file: &OpenFile) -> usize {
 }
 
 fn rebuild_view(open_file: &mut OpenFile) -> Result<(), String> {
-    if open_file.sort_col.is_none() && open_file.filter.is_none() {
+    if open_file.sort_col.is_none() && open_file.filters.is_empty() {
         open_file.view = None;
         return Ok(());
     }
@@ -152,7 +152,7 @@ fn rebuild_view(open_file: &mut OpenFile) -> Result<(), String> {
         &open_file.index,
         &mut file,
         open_file.sort_col,
-        open_file.filter.as_deref(),
+        &open_file.filters,
     );
     open_file.view = Some(view);
     Ok(())
@@ -168,12 +168,29 @@ pub fn set_sort(col: usize, tab_id: TabId, state: State<AppState>) -> Result<usi
 }
 
 #[tauri::command]
-pub fn set_filter(query: String, tab_id: TabId, state: State<AppState>) -> Result<usize, String> {
+pub fn set_filters(
+    filters: Vec<crate::search::FilterCriterion>,
+    tab_id: TabId,
+    state: State<AppState>,
+) -> Result<usize, String> {
     let mut guard = state.lock().map_err(|e| e.to_string())?;
     let open_file = guard.files.get_mut(&tab_id).ok_or_else(|| "tab not found".to_string())?;
-    open_file.filter = if query.is_empty() { None } else { Some(query) };
+    open_file.filters = filters;
     rebuild_view(open_file)?;
     Ok(view_len(open_file))
+}
+
+#[tauri::command]
+pub fn set_filter(query: String, tab_id: TabId, state: State<AppState>) -> Result<usize, String> {
+    let filters = if query.is_empty() {
+        Vec::new()
+    } else {
+        vec![crate::search::FilterCriterion {
+            col: None,
+            query,
+        }]
+    };
+    set_filters(filters, tab_id, state)
 }
 
 #[tauri::command]
@@ -190,9 +207,97 @@ pub fn clear_view(tab_id: TabId, state: State<AppState>) -> Result<(), String> {
     let mut guard = state.lock().map_err(|e| e.to_string())?;
     let open_file = guard.files.get_mut(&tab_id).ok_or_else(|| "tab not found".to_string())?;
     open_file.sort_col = None;
-    open_file.filter = None;
+    open_file.filters.clear();
     open_file.view = None;
     Ok(())
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SelectionStats {
+    pub selected_cells: usize,
+    pub selected_rows: usize,
+    pub selected_cols: usize,
+    pub numeric_count: usize,
+    pub sum: f64,
+}
+
+#[tauri::command]
+pub fn get_selection_stats(
+    tab_id: TabId,
+    row_min: usize,
+    row_max: usize,
+    col_min: usize,
+    col_max: usize,
+    state: State<AppState>,
+) -> Result<SelectionStats, String> {
+    let guard = state.lock().map_err(|e| e.to_string())?;
+    let open_file = guard.files.get(&tab_id).ok_or_else(|| "tab not found".to_string())?;
+    get_selection_stats_impl(open_file, row_min, row_max, col_min, col_max)
+}
+
+pub fn get_selection_stats_impl(
+    open_file: &OpenFile,
+    row_min: usize,
+    row_max: usize,
+    col_min: usize,
+    col_max: usize,
+) -> Result<SelectionStats, String> {
+    let total_rows = open_file
+        .view
+        .as_ref()
+        .map(|v| v.len())
+        .unwrap_or_else(|| open_file.overlay.row_count());
+
+    if total_rows == 0 || row_min >= total_rows {
+        return Ok(SelectionStats {
+            selected_cells: 0,
+            selected_rows: 0,
+            selected_cols: 0,
+            numeric_count: 0,
+            sum: 0.0,
+        });
+    }
+
+    let end_row = row_max.min(total_rows - 1);
+    let selected_rows = end_row.saturating_sub(row_min) + 1;
+    let selected_cols = col_max.saturating_sub(col_min) + 1;
+    let selected_cells = selected_rows * selected_cols;
+
+    let mut file = File::open(&open_file.path).map_err(|e| e.to_string())?;
+    let mut numeric_count = 0usize;
+    let mut sum = 0.0f64;
+
+    for i in row_min..=end_row {
+        let r = open_file.view.as_ref().map(|v| v[i]).unwrap_or(i);
+        if let Ok(row) = open_file.overlay.read_logical_row(&open_file.index, &mut file, r) {
+            for c in col_min..=col_max.min(row.len().saturating_sub(1)) {
+                if let Some(cell) = row.get(c) {
+                    let trimmed = cell.trim();
+                    if !trimmed.is_empty() {
+                        let clean = if trimmed.contains(',') && !trimmed.contains(' ') {
+                            trimmed.replace(',', "")
+                        } else {
+                            trimmed.to_string()
+                        };
+                        if let Ok(val) = clean.parse::<f64>() {
+                            if !val.is_nan() && !val.is_infinite() {
+                                numeric_count += 1;
+                                sum += val;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(SelectionStats {
+        selected_cells,
+        selected_rows,
+        selected_cols,
+        numeric_count,
+        sum,
+    })
 }
 
 /// Saves using the ORIGINAL index + overlay — deliberately ignores any
@@ -218,7 +323,7 @@ pub fn save_file(dst: Option<String>, tab_id: TabId, state: State<AppState>) -> 
         open_file.overlay = Overlay::new(open_file.index.row_count(), col_count);
         open_file.view = None;
         open_file.sort_col = None;
-        open_file.filter = None;
+        open_file.filters.clear();
     }
     Ok(())
 }
@@ -531,7 +636,7 @@ mod tests {
             overlay: Overlay::new(4, 2),
             view: None,
             sort_col: None,
-            filter: None,
+            filters: Vec::new(),
         };
 
         let rows = get_rows_impl(&open_file, 1, 2).unwrap();
@@ -550,7 +655,7 @@ mod tests {
             overlay: Overlay::new(2, 2),
             view: None,
             sort_col: None,
-            filter: None,
+            filters: Vec::new(),
         };
 
         let rows = get_rows_impl(&open_file, 0, 100).unwrap();
@@ -571,7 +676,7 @@ mod tests {
             overlay,
             view: None,
             sort_col: None,
-            filter: None,
+            filters: Vec::new(),
         };
 
         let rows = get_rows_impl(&open_file, 0, 2).unwrap();
@@ -592,7 +697,7 @@ mod tests {
             overlay: Overlay::new(3, 1),
             view: Some(vec![1, 0, 2]), // pretend a sort already reordered to a,b,c
             sort_col: None,
-            filter: None,
+            filters: Vec::new(),
         };
 
         let rows = get_rows_impl(&open_file, 0, 3).unwrap();
@@ -631,7 +736,7 @@ mod tests {
             overlay: Overlay::new(200_000, 27),
             view: None,
             sort_col: None,
-            filter: None,
+            filters: Vec::new(),
         };
 
         let t0 = std::time::Instant::now();
@@ -662,7 +767,7 @@ mod tests {
             overlay: Overlay::new(2, 2),
             view: None,
             sort_col: None,
-            filter: None,
+            filters: Vec::new(),
         });
         let state = Mutex::new(registry);
 
@@ -670,6 +775,36 @@ mod tests {
         let open_file = state.lock().unwrap().files.get_mut(&tab_id).unwrap().index.set_encoding(encoding_rs::SHIFT_JIS);
         let _ = open_file;
         assert_eq!(state.lock().unwrap().files.get(&tab_id).unwrap().index.encoding_label(), "Shift-JIS");
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn get_selection_stats_computes_correctly() {
+        let path = write_temp("sel_stats", "item,10,20.5\nother,30,text\nfinal,-5,100\n");
+        let index = CsvIndex::build(&path).unwrap();
+        let open_file = OpenFile {
+            path: path.clone(),
+            index,
+            overlay: Overlay::new(3, 3),
+            view: None,
+            sort_col: None,
+            filters: Vec::new(),
+        };
+
+        // Select all rows (0..2), cols 1..2 (the numeric columns)
+        let stats = get_selection_stats_impl(&open_file, 0, 2, 1, 2).unwrap();
+        assert_eq!(stats.selected_rows, 3);
+        assert_eq!(stats.selected_cols, 2);
+        assert_eq!(stats.selected_cells, 6);
+        // Numeric cells: 10, 20.5, 30, -5, 100 -> 5 numbers, sum = 155.5
+        assert_eq!(stats.numeric_count, 5);
+        assert!((stats.sum - 155.5).abs() < 1e-6);
+
+        // Select only col 0 (non-numeric)
+        let text_stats = get_selection_stats_impl(&open_file, 0, 2, 0, 0).unwrap();
+        assert_eq!(text_stats.numeric_count, 0);
+        assert_eq!(text_stats.sum, 0.0);
 
         std::fs::remove_file(&path).ok();
     }

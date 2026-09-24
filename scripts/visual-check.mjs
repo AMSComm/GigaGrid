@@ -58,10 +58,25 @@ window.__TAURI_INTERNALS__ = {
     const rows = window.__mockRows__;
     window.__sortCol__ = window.__sortCol__ ?? null;
     window.__filterQuery__ = window.__filterQuery__ ?? "";
+    window.__filters__ = window.__filters__ ?? [];
     window.__view__ = window.__view__ ?? null;
     function __computeView__() {
       let idxs = rows.map((_, i) => i);
-      if (window.__filterQuery__) idxs = idxs.filter((i) => rows[i].some((cell) => (cell || "").includes(window.__filterQuery__)));
+      if (window.__filters__ && window.__filters__.length > 0) {
+        idxs = idxs.filter((i) => {
+          const row = rows[i];
+          return window.__filters__.every((f) => {
+            const needle = (f.query || "").toLowerCase();
+            if (!needle) return true;
+            if (f.col !== null && f.col !== undefined) {
+              return (row[f.col] || "").toLowerCase().includes(needle);
+            }
+            return row.some((cell) => (cell || "").toLowerCase().includes(needle));
+          });
+        });
+      } else if (window.__filterQuery__) {
+        idxs = idxs.filter((i) => rows[i].some((cell) => (cell || "").includes(window.__filterQuery__)));
+      }
       if (window.__sortCol__ !== null) idxs = idxs.slice().sort((a, b) => (rows[a][window.__sortCol__] || "").localeCompare(rows[b][window.__sortCol__] || ""));
       return idxs;
     }
@@ -87,6 +102,41 @@ window.__TAURI_INTERNALS__ = {
       window.__view__ = (window.__filterQuery__ || window.__sortCol__ !== null) ? __computeView__() : null;
       return __viewLen__();
     }
+    if (cmd === "set_filters") {
+      window.__filters__ = args.filters || [];
+      window.__view__ = (window.__filters__.length > 0 || window.__sortCol__ !== null) ? __computeView__() : null;
+      return __viewLen__();
+    }
+    if (cmd === "get_selection_stats") {
+      const rowMin = args.rowMin || 0;
+      const rowMax = args.rowMax || 0;
+      const colMin = args.colMin || 0;
+      const colMax = args.colMax || 0;
+      const total = window.__view__ ? window.__view__.length : rows.length;
+      const endRow = Math.min(rowMax, total - 1);
+      const selected_rows = endRow >= rowMin ? endRow - rowMin + 1 : 0;
+      const selected_cols = colMax >= colMin ? colMax - colMin + 1 : 0;
+      const selected_cells = selected_rows * selected_cols;
+      let numeric_count = 0;
+      let sum = 0;
+      for (let i = rowMin; i <= endRow; i++) {
+        const r = window.__view__ ? window.__view__[i] : i;
+        const row = rows[r];
+        if (row) {
+          for (let c = colMin; c <= Math.min(colMax, row.length - 1); c++) {
+            const v = (row[c] || "").trim();
+            if (v) {
+              const num = Number(v.replace(/,/g, ""));
+              if (!Number.isNaN(num)) {
+                numeric_count++;
+                sum += num;
+              }
+            }
+          }
+        }
+      }
+      return { selected_cells, selected_rows, selected_cols, numeric_count, sum };
+    }
     if (cmd === "set_sort") {
       window.__sortCol__ = args.col;
       window.__view__ = __computeView__();
@@ -94,12 +144,13 @@ window.__TAURI_INTERNALS__ = {
     }
     if (cmd === "clear_sort") {
       window.__sortCol__ = null;
-      window.__view__ = window.__filterQuery__ ? __computeView__() : null;
+      window.__view__ = (window.__filters__?.length > 0 || window.__filterQuery__) ? __computeView__() : null;
       return __viewLen__();
     }
     if (cmd === "clear_view") {
       window.__sortCol__ = null;
       window.__filterQuery__ = "";
+      window.__filters__ = [];
       window.__view__ = null;
       return null;
     }
@@ -1020,7 +1071,10 @@ async function main() {
 
     // --- Check 18: filter narrows displayed rows + locks out edit/insert/
     // delete/search while active, unlocks again once cleared.
-    await page.fill('input[placeholder="Filter…"]', "filter-me-only");
+    await page.click('.filter-popover-anchor > button');
+    await page.waitForTimeout(200);
+    await page.fill('input[placeholder="Contains…"]', "filter-me-only");
+    await page.keyboard.press("Enter");
     await page.waitForTimeout(400);
     console.log("Row count after filtering to the unique needle (expect 1 rows):", await rowCountText());
 
@@ -1032,7 +1086,10 @@ async function main() {
     // widen the filter so the scrollable area still has a row to right-click
     // (a 1-row filtered view renders as the sticky frozen row only, leaving
     // nothing in the scrollable area below it).
-    await page.fill('input[placeholder="Filter…"]', "c1_");
+    await page.click('.filter-popover-anchor > button');
+    await page.waitForTimeout(200);
+    await page.fill('input[placeholder="Contains…"]', "c1_");
+    await page.keyboard.press("Enter");
     await page.waitForTimeout(400);
     const rowsForLockCheck = await page.$$(rowSelector);
     const gutterForLockCheck = await gutterAt(rowsForLockCheck, 0);
@@ -1045,7 +1102,15 @@ async function main() {
     console.log("'Insert row above' disabled while filter active (expect true):", insertDisabledDuringFilter);
     await page.keyboard.press("Escape");
 
-    await page.fill('input[placeholder="Filter…"]', "");
+    await page.click('.filter-popover-anchor > button');
+    await page.waitForTimeout(200);
+    const clearBtn = await page.$('.filter-popover-anchor button:has-text("Clear")');
+    if (clearBtn) {
+      await clearBtn.click();
+    } else {
+      await page.fill('input[placeholder="Contains…"]', "");
+      await page.keyboard.press("Enter");
+    }
     await page.waitForTimeout(400);
     console.log("Row count after clearing filter (expect 50 rows):", await rowCountText());
     const searchEnabledAfterClear = await page.evaluate(

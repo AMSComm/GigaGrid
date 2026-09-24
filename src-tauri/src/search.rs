@@ -155,6 +155,12 @@ pub fn compute_replace_cell(
     Some(current.replace(query, replacement))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct FilterCriterion {
+    pub col: Option<usize>,
+    pub query: String,
+}
+
 /// Returns LOGICAL row indices in the desired display order/subset — a
 /// permutation (or filtered subset) of `0..overlay.row_count()`, never a
 /// data copy. Reads go through `overlay.read_logical_row` (same as every
@@ -165,20 +171,35 @@ pub fn sorted_filtered_view(
     index: &CsvIndex,
     file: &mut File,
     sort_col: Option<usize>,
-    filter: Option<&str>,
+    filters: &[FilterCriterion],
 ) -> Vec<usize> {
     let row_count = overlay.row_count();
     let mut rows: Vec<usize> = (0..row_count).collect();
 
-    if let Some(needle) = filter {
-        if !needle.is_empty() {
-            rows.retain(|&r| {
-                overlay
-                    .read_logical_row(index, file, r)
-                    .map(|row| row.iter().any(|cell| cell.contains(needle)))
-                    .unwrap_or(false)
-            });
-        }
+    let active_filters: Vec<(&FilterCriterion, String)> = filters
+        .iter()
+        .filter(|f| !f.query.trim().is_empty())
+        .map(|f| (f, f.query.to_lowercase()))
+        .collect();
+
+    if !active_filters.is_empty() {
+        rows.retain(|&r| {
+            if let Ok(row) = overlay.read_logical_row(index, file, r) {
+                active_filters.iter().all(|(criterion, needle_lower)| {
+                    match criterion.col {
+                        Some(col_idx) => row
+                            .get(col_idx)
+                            .map(|cell| cell.to_lowercase().contains(needle_lower))
+                            .unwrap_or(false),
+                        None => row
+                            .iter()
+                            .any(|cell| cell.to_lowercase().contains(needle_lower)),
+                    }
+                })
+            } else {
+                false
+            }
+        });
     }
 
     if let Some(col) = sort_col {
@@ -373,7 +394,7 @@ mod tests {
         let index = CsvIndex::build(&path).unwrap();
         let mut file = File::open(&path).unwrap();
         let overlay = overlay_for(3, 2);
-        let view = sorted_filtered_view(&overlay, &index, &mut file, Some(0), None);
+        let view = sorted_filtered_view(&overlay, &index, &mut file, Some(0), &[]);
         // original rows: 0="c,3" 1="a,1" 2="b,2" -> sorted by col 0 -> a,b,c -> rows 1,2,0
         assert_eq!(view, vec![1, 2, 0]);
         std::fs::remove_file(&path).ok();
@@ -385,8 +406,50 @@ mod tests {
         let index = CsvIndex::build(&path).unwrap();
         let mut file = File::open(&path).unwrap();
         let overlay = overlay_for(3, 2);
-        let view = sorted_filtered_view(&overlay, &index, &mut file, None, Some("av"));
-        assert_eq!(view, vec![2]); // only "avocado" (row 2) contains "av" besides row 0? "apple" has no "av"
+        let filters = vec![FilterCriterion { col: None, query: "av".to_string() }];
+        let view = sorted_filtered_view(&overlay, &index, &mut file, None, &filters);
+        assert_eq!(view, vec![2]); // only "avocado" (row 2) contains "av"
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn sorted_filtered_view_filters_by_specific_column() {
+        let path = write_temp("view_filter_col", "john,developer\njane,designer\nbob,developer\n");
+        let index = CsvIndex::build(&path).unwrap();
+        let mut file = File::open(&path).unwrap();
+        let overlay = overlay_for(3, 2);
+        // Col 0 has names, Col 1 has roles. Filter Col 1 for "developer"
+        let filters = vec![FilterCriterion { col: Some(1), query: "developer".to_string() }];
+        let view = sorted_filtered_view(&overlay, &index, &mut file, None, &filters);
+        assert_eq!(view, vec![0, 2]);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn sorted_filtered_view_multi_criteria_and() {
+        let path = write_temp("view_filter_multi", "alice,sales,east\nbob,sales,west\ncharlie,dev,east\n");
+        let index = CsvIndex::build(&path).unwrap();
+        let mut file = File::open(&path).unwrap();
+        let overlay = overlay_for(3, 3);
+        // Role = sales AND Region = east -> only row 0 (alice)
+        let filters = vec![
+            FilterCriterion { col: Some(1), query: "sales".to_string() },
+            FilterCriterion { col: Some(2), query: "east".to_string() },
+        ];
+        let view = sorted_filtered_view(&overlay, &index, &mut file, None, &filters);
+        assert_eq!(view, vec![0]);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn sorted_filtered_view_case_insensitive() {
+        let path = write_temp("view_filter_case", "Apple\nBANANA\ncherry\n");
+        let index = CsvIndex::build(&path).unwrap();
+        let mut file = File::open(&path).unwrap();
+        let overlay = overlay_for(3, 1);
+        let filters = vec![FilterCriterion { col: None, query: "banana".to_string() }];
+        let view = sorted_filtered_view(&overlay, &index, &mut file, None, &filters);
+        assert_eq!(view, vec![1]);
         std::fs::remove_file(&path).ok();
     }
 
@@ -397,7 +460,7 @@ mod tests {
         let mut file = File::open(&path).unwrap();
         let mut overlay = overlay_for(2, 2);
         overlay.set(0, 0, "a".to_string()); // row 0 was "z", now overlay says "a"
-        let view = sorted_filtered_view(&overlay, &index, &mut file, Some(0), None);
+        let view = sorted_filtered_view(&overlay, &index, &mut file, Some(0), &[]);
         // sorted by overlay-merged col 0: "a" (row 0), "y" (row 1) -> [0, 1]
         assert_eq!(view, vec![0, 1]);
         std::fs::remove_file(&path).ok();

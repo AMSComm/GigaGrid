@@ -105,6 +105,7 @@ interface CellPos {
 export const Grid = forwardRef<GridHandle, GridProps>(function Grid({ tabId, rowCount, showGridChrome, freezeHeader, freezeCols, onFreezeColsChange, onStatsChange, onDirtyChange, onError, onRowCountChange, viewActive, onSortChange }, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const fetchTimer = useRef<number | null>(null);
+  const statsRequestId = useRef(0);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
   const [rowsByIndex, setRowsByIndex] = useState<Map<number, string[]>>(new Map());
@@ -363,13 +364,129 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({ tabId, row
   useEffect(() => {
     const b = selectionBounds();
     const colCount = rowsByIndex.get(0)?.length ?? 0;
+    if (!b) {
+      onStatsChangeRef.current?.({
+        totalCols: colCount,
+        cursor: selEnd,
+        selection: null,
+      });
+      return;
+    }
+
+    const selRows = b.rowMax - b.rowMin + 1;
+    const selCols = b.colMax - b.colMin + 1;
+    const totalCells = selRows * selCols;
+
+    // Fast-path: check if selection is small and rows are cached in rowsByIndex
+    let allCached = selRows <= 1000;
+    if (allCached) {
+      for (let r = b.rowMin; r <= b.rowMax; r++) {
+        if (!rowsByIndex.has(r)) {
+          allCached = false;
+          break;
+        }
+      }
+    }
+
+    if (allCached) {
+      let numericCount = 0;
+      let sum = 0;
+      for (let r = b.rowMin; r <= b.rowMax; r++) {
+        const rowData = rowsByIndex.get(r);
+        if (rowData) {
+          for (let c = b.colMin; c <= b.colMax; c++) {
+            const val = rowData[c];
+            if (val !== undefined) {
+              const trimmed = val.trim();
+              if (trimmed !== "") {
+                const clean = trimmed.includes(",") && !trimmed.includes(" ") ? trimmed.replace(/,/g, "") : trimmed;
+                const num = Number(clean);
+                if (!Number.isNaN(num) && Number.isFinite(num)) {
+                  numericCount++;
+                  sum += num;
+                }
+              }
+            }
+          }
+        }
+      }
+      onStatsChangeRef.current?.({
+        totalCols: colCount,
+        cursor: selEnd,
+        selection: {
+          rows: selRows,
+          cols: selCols,
+          cells: totalCells,
+          numericCount,
+          sum,
+          loading: false,
+        },
+      });
+      return;
+    }
+
+    // Uncached / large selection: immediately emit dimension info with loading=true
     onStatsChangeRef.current?.({
       totalCols: colCount,
       cursor: selEnd,
-      selection: b ? { rows: b.rowMax - b.rowMin + 1, cols: b.colMax - b.colMin + 1 } : null,
+      selection: {
+        rows: selRows,
+        cols: selCols,
+        cells: totalCells,
+        loading: true,
+      },
     });
+
+    const reqId = ++statsRequestId.current;
+    const timer = window.setTimeout(() => {
+      invoke<{
+        selected_cells: number;
+        selected_rows: number;
+        selected_cols: number;
+        numeric_count: number;
+        sum: number;
+      }>("get_selection_stats", {
+        tabId,
+        rowMin: b.rowMin,
+        rowMax: b.rowMax,
+        colMin: b.colMin,
+        colMax: b.colMax,
+      })
+        .then((res) => {
+          if (statsRequestId.current === reqId) {
+            onStatsChangeRef.current?.({
+              totalCols: colCount,
+              cursor: selEnd,
+              selection: {
+                rows: res.selected_rows,
+                cols: res.selected_cols,
+                cells: res.selected_cells,
+                numericCount: res.numeric_count,
+                sum: res.sum,
+                loading: false,
+              },
+            });
+          }
+        })
+        .catch(() => {
+          if (statsRequestId.current === reqId) {
+            onStatsChangeRef.current?.({
+              totalCols: colCount,
+              cursor: selEnd,
+              selection: {
+                rows: selRows,
+                cols: selCols,
+                cells: totalCells,
+                loading: false,
+              },
+            });
+          }
+        });
+    }, 200);
+
+    return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selStart, selEnd, rowsByIndex]);
+  }, [selStart, selEnd, rowsByIndex, tabId]);
 
   function isSelected(row: number, col: number) {
     const b = selectionBounds();

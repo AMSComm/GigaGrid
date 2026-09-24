@@ -181,6 +181,8 @@ pub fn run() {
             commands::redo,
             commands::set_sort,
             commands::set_filter,
+            commands::set_filters,
+            commands::get_selection_stats,
             commands::clear_sort,
             commands::clear_view,
             commands::insert_row,

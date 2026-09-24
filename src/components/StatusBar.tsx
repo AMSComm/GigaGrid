@@ -1,9 +1,18 @@
 import { useState, useEffect } from "react";
 
+export interface SelectionInfo {
+  rows: number;
+  cols: number;
+  cells: number;
+  numericCount?: number;
+  sum?: number;
+  loading?: boolean;
+}
+
 export interface GridStats {
   totalCols: number;
   cursor: { row: number; col: number } | null;
-  selection: { rows: number; cols: number } | null;
+  selection: SelectionInfo | null;
 }
 
 export interface StatusFile {
@@ -363,9 +372,15 @@ export function StatusBar({
             cursor: R{stats.cursor.row + 1}, C{stats.cursor.col + 1}
           </span>
         )}
-        {stats.selection && stats.selection.rows * stats.selection.cols > 1 && (
-          <span style={{ opacity: 0.8 }}>
-            selection: {stats.selection.rows} × {stats.selection.cols}
+        {stats.selection && stats.selection.cells > 1 && (
+          <span style={{ opacity: 0.8 }} title={`${stats.selection.cells.toLocaleString()} cells selected`}>
+            selection: {stats.selection.cells.toLocaleString()} cells ({stats.selection.rows.toLocaleString()}R × {stats.selection.cols.toLocaleString()}C)
+            {stats.selection.loading && <span> | Sum: …</span>}
+            {!stats.selection.loading && stats.selection.numericCount !== undefined && stats.selection.numericCount > 0 && (
+              <span>
+                {" | "}Count: {stats.selection.numericCount.toLocaleString()} | Sum: {stats.selection.sum!.toLocaleString(undefined, { maximumFractionDigits: 4 })}
+              </span>
+            )}
           </span>
         )}
       </div>

@@ -2,6 +2,14 @@
 
 All notable changes to **Gigagrid** will be documented in this file.
 
+## [v0.4.2] - 2026-09-24
+
+### 🐛 Bug Fixes
+- **Dynamic Row Gutter Sizing**: Scaled the row-number gutter width dynamically according to total dataset rows (`rowCount`), preventing line numbers on large datasets (hundreds of thousands or millions of rows) from expanding and causing horizontal misalignment between column headers and data rows.
+- **Unified Fixed Gutter Dimensions**: Pinned `width`, `minWidth`, and `maxWidth` across the top-left header corner, frozen row, and all virtualized rows to ensure pixel-perfect vertical alignment at any scroll depth.
+
+---
+
 ## [v0.4.1] - 2026-09-24
 
 ### 🐛 Bug Fixes

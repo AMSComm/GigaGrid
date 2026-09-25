@@ -2,6 +2,15 @@
 
 All notable changes to **Gigagrid** will be documented in this file.
 
+## [v0.4.3] - 2026-09-25
+
+### 🐛 Bug Fixes
+- **Virtual Scroll Height Scaling (>1M Rows)**: Overcame the browser's hard DOM element height limit (~33.55M px) via virtual scroll stretching and height scaling. Gigagrid can now smoothly scroll, jump, and navigate through millions of rows all the way to the end without hitting container ceilings.
+- **Scroll Position Mapping**: Linearly maps physical container scroll positions to virtual row coordinates, ensuring `scrollToRow`, arrow-key navigation, and search result jumping work across datasets of any scale.
+- **Error Boundary & Crash Resilience**: Added a root React `ErrorBoundary` and global error handling to safeguard against unexpected runtime or IPC errors, preventing white-screen crashes.
+
+---
+
 ## [v0.4.2] - 2026-09-24
 
 ### 🐛 Bug Fixes

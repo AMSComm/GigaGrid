@@ -27,6 +27,101 @@ const MIN_COL_WIDTH = 40;
 const DEFAULT_COL_WIDTH = 100;
 const COPY_CHUNK_ROWS = 5000;
 
+/**
+ * Browser engines enforce a hard limit on DOM element dimensions (e.g. Chrome/WebKit ~33.55M px).
+ * For a 28px row height, this limit is reached around ~1.198 million rows (33,554,428 / 28).
+ * When theoretical height exceeds this threshold, virtual scrolling downscales the scrollbar container
+ * to stay safely within browser limits and maps physical scroll offsets to virtual row space.
+ */
+export const MAX_SCROLL_CONTAINER_HEIGHT = 15_000_000;
+
+export interface ScrollMetrics {
+  totalRows: number;
+  rowHeight: number;
+  viewportHeight: number;
+  modelHeight: number;
+  containerHeight: number;
+  maxPhysicalScroll: number;
+  maxVirtualScroll: number;
+  scale: number;
+  isScaled: boolean;
+}
+
+export function computeScrollMetrics(
+  totalRows: number,
+  rowHeight: number,
+  viewportHeight: number,
+  maxContainerHeight: number = MAX_SCROLL_CONTAINER_HEIGHT,
+): ScrollMetrics {
+  const modelHeight = Math.max(0, totalRows * rowHeight);
+  if (totalRows <= 0 || rowHeight <= 0 || viewportHeight <= 0) {
+    return {
+      totalRows,
+      rowHeight,
+      viewportHeight,
+      modelHeight,
+      containerHeight: modelHeight,
+      maxPhysicalScroll: 0,
+      maxVirtualScroll: 0,
+      scale: 1,
+      isScaled: false,
+    };
+  }
+
+  const isScaled = modelHeight > maxContainerHeight;
+  const containerHeight = isScaled ? maxContainerHeight : modelHeight;
+  const maxPhysicalScroll = Math.max(0, containerHeight - viewportHeight);
+  const maxVirtualScroll = Math.max(0, modelHeight - viewportHeight);
+  const scale = isScaled && maxPhysicalScroll > 0 ? maxVirtualScroll / maxPhysicalScroll : 1;
+
+  return {
+    totalRows,
+    rowHeight,
+    viewportHeight,
+    modelHeight,
+    containerHeight,
+    maxPhysicalScroll,
+    maxVirtualScroll,
+    scale,
+    isScaled,
+  };
+}
+
+export function physicalToVirtualScrollTop(
+  physicalScrollTop: number,
+  metrics: ScrollMetrics,
+): number {
+  if (!metrics.isScaled || metrics.maxPhysicalScroll <= 0) {
+    return Math.max(0, Math.min(physicalScrollTop, metrics.maxVirtualScroll));
+  }
+  const clampedPhysical = Math.max(0, Math.min(physicalScrollTop, metrics.maxPhysicalScroll));
+  return (clampedPhysical / metrics.maxPhysicalScroll) * metrics.maxVirtualScroll;
+}
+
+export function virtualToPhysicalScrollTop(
+  virtualScrollTop: number,
+  metrics: ScrollMetrics,
+): number {
+  if (!metrics.isScaled || metrics.maxVirtualScroll <= 0) {
+    return Math.max(0, Math.min(virtualScrollTop, metrics.maxPhysicalScroll));
+  }
+  const clampedVirtual = Math.max(0, Math.min(virtualScrollTop, metrics.maxVirtualScroll));
+  return (clampedVirtual / metrics.maxVirtualScroll) * metrics.maxPhysicalScroll;
+}
+
+export function computeDomRowTop(
+  offset: number,
+  rowHeight: number,
+  physicalScrollTop: number,
+  virtualScrollTop: number,
+  isScaled: boolean,
+): number {
+  if (!isScaled) {
+    return offset * rowHeight;
+  }
+  return physicalScrollTop + (offset * rowHeight - virtualScrollTop);
+}
+
 export interface VisibleRange {
   start: number;
   count: number;
@@ -128,6 +223,19 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({ tabId, row
   const [rowHeight, setRowHeight] = useState(ROW_HEIGHT);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const gutterWidth = computeGutterWidth(rowCount);
+
+  // When freezeHeader is on, row 0 is permanently shown via the frozen bar and
+  // is excluded from the normal scrollable list entirely (not just hidden) —
+  // otherwise its vacated absolute-position slot stays empty and every row
+  // below it renders one rowHeight too low, showing as a gap under the frozen
+  // bar. scrollableRowCount/fetchStart below keep scrollTop, computeWindow's
+  // range, and each row's rendered `top` all agreeing on the same coordinate
+  // space (offset 0 = the first SCROLLABLE row, i.e. logical row 1 here).
+  const scrollableRowCount = freezeHeader ? Math.max(0, rowCount - 1) : rowCount;
+  const metrics = computeScrollMetrics(scrollableRowCount, rowHeight, viewportHeight);
+  const virtualScrollTop = physicalToVirtualScrollTop(scrollTop, metrics);
+  const range = computeWindow(virtualScrollTop, rowHeight, viewportHeight, scrollableRowCount, OVERSCAN);
+
   // Bumped by invalidateCache() and included in both fetch effects' own
   // dependency arrays below — those arrays deliberately track `range`/
   // `rowCount`/`freezeHeader` only (see the eslint-disable on each), which
@@ -247,14 +355,16 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({ tabId, row
     // here previously under-scrolled by exactly that many px, leaving the
     // target cell still clipped at the bottom/right edge after "jumping" to it.
     const topCover = (showGridChrome ? HEADER_HEIGHT : 0) + (freezeHeader ? HEADER_HEIGHT : 0);
-    const rowTop = topCover + offset * rowHeight;
-    const rowBottom = rowTop + rowHeight;
-    const visibleTop = el.scrollTop + topCover;
-    const visibleBottom = el.scrollTop + el.clientHeight;
-    if (rowTop < visibleTop) {
-      el.scrollTop = rowTop - topCover;
-    } else if (rowBottom > visibleBottom) {
-      el.scrollTop = rowBottom - el.clientHeight;
+    const virtualRowTop = topCover + offset * rowHeight;
+    const virtualRowBottom = virtualRowTop + rowHeight;
+    const visibleTop = virtualScrollTop + topCover;
+    const visibleBottom = virtualScrollTop + el.clientHeight;
+    if (virtualRowTop < visibleTop) {
+      const targetVirtual = virtualRowTop - topCover;
+      el.scrollTop = virtualToPhysicalScrollTop(targetVirtual, metrics);
+    } else if (virtualRowBottom > visibleBottom) {
+      const targetVirtual = virtualRowBottom - el.clientHeight;
+      el.scrollTop = virtualToPhysicalScrollTop(targetVirtual, metrics);
     }
 
     const leftCover = showGridChrome ? gutterWidth : 0;
@@ -275,7 +385,8 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({ tabId, row
       const el = containerRef.current;
       if (!el) return;
       const offset = freezeHeader ? Math.max(0, row - 1) : row;
-      el.scrollTop = offset * rowHeight;
+      const targetVirtual = offset * rowHeight;
+      el.scrollTop = virtualToPhysicalScrollTop(targetVirtual, metrics);
     },
     scrollToCol: (col: number) => {
       const el = containerRef.current;
@@ -291,16 +402,6 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({ tabId, row
     },
     invalidateCache,
   }));
-
-  // When freezeHeader is on, row 0 is permanently shown via the frozen bar and
-  // is excluded from the normal scrollable list entirely (not just hidden) —
-  // otherwise its vacated absolute-position slot stays empty and every row
-  // below it renders one rowHeight too low, showing as a gap under the frozen
-  // bar. scrollableRowCount/fetchStart below keep scrollTop, computeWindow's
-  // range, and each row's rendered `top` all agreeing on the same coordinate
-  // space (offset 0 = the first SCROLLABLE row, i.e. logical row 1 here).
-  const scrollableRowCount = freezeHeader ? Math.max(0, rowCount - 1) : rowCount;
-  const range = computeWindow(scrollTop, rowHeight, viewportHeight, scrollableRowCount, OVERSCAN);
 
   useEffect(() => {
     if (range.count === 0) return;
@@ -320,6 +421,8 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({ tabId, row
         (rows) => {
           setRowsByIndex((prev) => {
             const next = prev.size > MAX_CACHE_ROWS ? new Map<number, string[]>() : new Map(prev);
+            const rowZero = prev.get(0);
+            if (rowZero) next.set(0, rowZero);
             rows.forEach((row, i) => next.set(fetchStart + i, row));
             return next;
           });
@@ -330,14 +433,14 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({ tabId, row
   }, [range.start, range.count, freezeHeader, cacheGeneration]);
 
   useEffect(() => {
-    if (!freezeHeader || rowCount === 0) return;
+    if (rowCount === 0) return;
     if (rowsByIndex.has(0)) return;
     invoke<string[][]>("get_rows", { tabId, start: 0, count: 1 }).then((rows) => {
       if (!rows[0]) return;
       setRowsByIndex((prev) => new Map(prev).set(0, rows[0]));
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [freezeHeader, rowCount, cacheGeneration]);
+  }, [rowCount, cacheGeneration]);
 
   function commitCell(rowIndex: number, colIndex: number, value: string) {
     invoke("set_cell", { tabId, row: rowIndex, col: colIndex, value }).then(() => {
@@ -362,7 +465,8 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({ tabId, row
     const el = containerRef.current;
     if (!el) return;
     const offset = freezeHeader ? Math.max(0, rowIndex - 1) : rowIndex;
-    el.scrollTop = offset * rowHeight;
+    const targetVirtual = offset * rowHeight;
+    el.scrollTop = virtualToPhysicalScrollTop(targetVirtual, metrics);
   }
 
   function selectionBounds() {
@@ -782,7 +886,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({ tabId, row
     }
   }
 
-  const totalHeight = scrollableRowCount * rowHeight;
+  const totalHeight = metrics.containerHeight;
   const colCount = rowsByIndex.get(0)?.length ?? 0;
   const chromeOffset = showGridChrome ? HEADER_HEIGHT : 0;
   const chromeBorder = showGridChrome
@@ -936,12 +1040,13 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({ tabId, row
           const rowIndex = freezeHeader ? offset + 1 : offset;
           const row = rowsByIndex.get(rowIndex);
           const malformed = row !== undefined && colCount > 0 && row.length !== colCount;
+          const domRowTop = computeDomRowTop(offset, rowHeight, scrollTop, virtualScrollTop, metrics.isScaled);
           return (
             <div
               key={rowIndex}
               style={{
                 position: "absolute",
-                top: offset * rowHeight,
+                top: domRowTop,
                 height: rowHeight,
                 display: "flex",
                 width: "fit-content",

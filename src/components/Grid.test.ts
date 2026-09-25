@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { computeGutterWidth, computeWindow, fetchRowsInChunks, MIN_GUTTER_WIDTH } from "./Grid";
+import {
+  computeDomRowTop,
+  computeGutterWidth,
+  computeScrollMetrics,
+  computeWindow,
+  fetchRowsInChunks,
+  MAX_SCROLL_CONTAINER_HEIGHT,
+  MIN_GUTTER_WIDTH,
+  physicalToVirtualScrollTop,
+  virtualToPhysicalScrollTop,
+} from "./Grid";
 
 describe("computeGutterWidth", () => {
   it("returns MIN_GUTTER_WIDTH for empty or small row counts", () => {
@@ -97,3 +107,145 @@ describe("fetchRowsInChunks", () => {
     expect(rows).toEqual([]);
   });
 });
+
+describe("virtual scroll scaling (handling > 1 million rows)", () => {
+  it("remains unscaled when dataset height is within MAX_SCROLL_CONTAINER_HEIGHT", () => {
+    // 50,000 rows * 28px = 1,400,000px <= 15,000,000px
+    const metrics = computeScrollMetrics(50000, 28, 600);
+    expect(metrics.isScaled).toBe(false);
+    expect(metrics.scale).toBe(1);
+    expect(metrics.modelHeight).toBe(1400000);
+    expect(metrics.containerHeight).toBe(1400000);
+    expect(metrics.maxPhysicalScroll).toBe(1399400);
+    expect(metrics.maxVirtualScroll).toBe(1399400);
+
+    // Physical to virtual mapping is 1:1
+    expect(physicalToVirtualScrollTop(500, metrics)).toBe(500);
+    expect(virtualToPhysicalScrollTop(500, metrics)).toBe(500);
+  });
+
+  it("handles edge cases (zero/negative dimensions) safely without crashing", () => {
+    const zeroRows = computeScrollMetrics(0, 28, 600);
+    expect(zeroRows.isScaled).toBe(false);
+    expect(zeroRows.containerHeight).toBe(0);
+    expect(zeroRows.scale).toBe(1);
+    expect(physicalToVirtualScrollTop(100, zeroRows)).toBe(0);
+    expect(virtualToPhysicalScrollTop(100, zeroRows)).toBe(0);
+
+    const zeroViewport = computeScrollMetrics(1000, 28, 0);
+    expect(zeroViewport.isScaled).toBe(false);
+    expect(zeroViewport.maxPhysicalScroll).toBe(0);
+  });
+
+  it("enables scaling and caps container height when theoretical height exceeds MAX_SCROLL_CONTAINER_HEIGHT", () => {
+    // 2,000,000 rows * 28px = 56,000,000px (> 15,000,000px and exceeds browser ~33.5M px limit)
+    const totalRows = 2000000;
+    const rowHeight = 28;
+    const viewportHeight = 800;
+    const metrics = computeScrollMetrics(totalRows, rowHeight, viewportHeight);
+
+    expect(metrics.isScaled).toBe(true);
+    expect(metrics.modelHeight).toBe(56000000);
+    // Container height is safely clamped to MAX_SCROLL_CONTAINER_HEIGHT (15,000,000)
+    expect(metrics.containerHeight).toBe(MAX_SCROLL_CONTAINER_HEIGHT);
+    expect(metrics.containerHeight).toBeLessThanOrEqual(33554400); // within browser DOM limit
+
+    // Max physical scroll
+    expect(metrics.maxPhysicalScroll).toBe(15000000 - 800);
+    // Max virtual scroll
+    expect(metrics.maxVirtualScroll).toBe(56000000 - 800);
+    expect(metrics.scale).toBeCloseTo(55999200 / 14999200, 5);
+  });
+
+  it("maps physical scroll positions to virtual positions across full range (0 to bottom)", () => {
+    const totalRows = 2000000;
+    const rowHeight = 28;
+    const viewportHeight = 800;
+    const metrics = computeScrollMetrics(totalRows, rowHeight, viewportHeight);
+
+    // Top of file
+    expect(physicalToVirtualScrollTop(0, metrics)).toBe(0);
+
+    // Bottom of file (scroll thumb dragged all the way down)
+    const virtualBottom = physicalToVirtualScrollTop(metrics.maxPhysicalScroll, metrics);
+    expect(virtualBottom).toBe(metrics.maxVirtualScroll);
+
+    // Window computed at bottom includes the final rows up to row 2,000,000
+    const windowAtBottom = computeWindow(virtualBottom, rowHeight, viewportHeight, totalRows, 10);
+    expect(windowAtBottom.start + windowAtBottom.count).toBe(totalRows);
+
+    // Midpoint mapping
+    const halfPhysical = metrics.maxPhysicalScroll / 2;
+    const halfVirtual = physicalToVirtualScrollTop(halfPhysical, metrics);
+    expect(halfVirtual).toBeCloseTo(metrics.maxVirtualScroll / 2, 0);
+  });
+
+  it("roundtrips between virtual and physical coordinates accurately", () => {
+    const totalRows = 3000000; // 3 million rows
+    const metrics = computeScrollMetrics(totalRows, 28, 700);
+
+    // Test multiple target virtual scroll points
+    const targetVirtuals = [0, 1000000, 25000000, 50000000, metrics.maxVirtualScroll];
+    for (const v of targetVirtuals) {
+      const physical = virtualToPhysicalScrollTop(v, metrics);
+      expect(physical).toBeGreaterThanOrEqual(0);
+      expect(physical).toBeLessThanOrEqual(metrics.maxPhysicalScroll);
+
+      const roundtripVirtual = physicalToVirtualScrollTop(physical, metrics);
+      expect(roundtripVirtual).toBeCloseTo(v, 2);
+    }
+  });
+
+  it("computes DOM row top positions correctly in both unscaled and scaled modes", () => {
+    // Unscaled: domRowTop is strictly offset * rowHeight
+    expect(computeDomRowTop(10, 28, 100, 100, false)).toBe(280);
+
+    // Scaled mode: positioned relative to viewport's current physical scroll
+    const rowHeight = 28;
+    const physicalScrollTop = 5000000;
+    const virtualScrollTop = 20000000;
+    // Row whose virtual position is exactly at virtualScrollTop + 56px (2 rows down)
+    const targetRowOffset = Math.floor(virtualScrollTop / rowHeight) + 2;
+    const domTop = computeDomRowTop(targetRowOffset, rowHeight, physicalScrollTop, virtualScrollTop, true);
+
+    // In viewport space, distance from physicalScrollTop should match the virtual delta
+    const deltaY = targetRowOffset * rowHeight - virtualScrollTop;
+    expect(domTop - physicalScrollTop).toBe(deltaY);
+
+    // Bottom row at max physical scroll sits flush with container bottom
+    const metrics = computeScrollMetrics(2000000, 28, 800);
+    const lastRowOffset = 2000000 - 1;
+    const lastRowDomTop = computeDomRowTop(
+      lastRowOffset,
+      28,
+      metrics.maxPhysicalScroll,
+      metrics.maxVirtualScroll,
+      metrics.isScaled,
+    );
+    expect(lastRowDomTop + 28).toBe(metrics.containerHeight);
+  });
+
+  it("allows jumping to rows > 1 million via virtualToPhysicalScrollTop", () => {
+    // User reported: scrolling stops around ~1M rows.
+    // Verify that navigating to row 1,800,000 works seamlessly:
+    const totalRows = 2000000;
+    const rowHeight = 28;
+    const viewportHeight = 800;
+    const metrics = computeScrollMetrics(totalRows, rowHeight, viewportHeight);
+
+    const targetRow = 1800000;
+    const targetVirtualScroll = targetRow * rowHeight;
+    const physicalScroll = virtualToPhysicalScrollTop(targetVirtualScroll, metrics);
+
+    // Physical scroll is within container bounds
+    expect(physicalScroll).toBeGreaterThan(0);
+    expect(physicalScroll).toBeLessThanOrEqual(metrics.maxPhysicalScroll);
+
+    // Browser receives physical scroll and onScroll maps back to virtual range around row 1,800,000
+    const resolvedVirtual = physicalToVirtualScrollTop(physicalScroll, metrics);
+    const window = computeWindow(resolvedVirtual, rowHeight, viewportHeight, totalRows, 10);
+    expect(window.start).toBeLessThanOrEqual(targetRow);
+    expect(window.start + window.count).toBeGreaterThan(targetRow);
+  });
+});
+

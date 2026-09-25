@@ -11,6 +11,7 @@ import { Toolbar } from "./components/Toolbar";
 import { SearchPanel, type SearchPanelHandle } from "./components/SearchPanel";
 import { StatusBar, type GridStats } from "./components/StatusBar";
 import { loadSettings, saveSettings, pushRecentFile, type Settings, type Theme } from "./settings";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { IconFolder, IconSave, IconMonitor, IconSun, IconMoon, IconGrid, IconPin, IconDownload, IconClock } from "./icons";
 import {
   findExistingTab,
@@ -714,27 +715,29 @@ function App() {
               style={{ display: isActive ? "flex" : "none", flexDirection: "column", flex: 1, minHeight: 0 }}
             >
               <div style={{ flex: 1, minHeight: 0 }}>
-                <Grid
-                  ref={(handle) => {
-                    if (handle) gridRefs.current.set(tab.meta.tab_id, handle);
-                    else gridRefs.current.delete(tab.meta.tab_id);
-                  }}
-                  tabId={tab.meta.tab_id}
-                  rowCount={tab.meta.row_count}
-                  showGridChrome={settings.showGridChrome}
-                  freezeHeader={settings.freezeHeader}
-                  freezeCols={settings.freezeCols}
-                  onFreezeColsChange={(freezeCols) => updateSettings({ freezeCols })}
-                  onStatsChange={(stats) => {
-                    updateTab(tab.meta.tab_id, { stats, error: null });
-                    setOpenError(null);
-                  }}
-                  onDirtyChange={(dirty) => updateTab(tab.meta.tab_id, { dirty })}
-                  onError={(message) => updateTab(tab.meta.tab_id, { error: message })}
-                  onRowCountChange={(row_count) => updateTab(tab.meta.tab_id, { meta: { ...tab.meta, row_count } })}
-                  viewActive={tab.filterActive || tab.sortActive}
-                  onSortChange={(active, rowCount) => updateTab(tab.meta.tab_id, { sortActive: active, meta: { ...tab.meta, row_count: rowCount } })}
-                />
+                <ErrorBoundary fallbackTitle="Data Grid encountered an unexpected error">
+                  <Grid
+                    ref={(handle) => {
+                      if (handle) gridRefs.current.set(tab.meta.tab_id, handle);
+                      else gridRefs.current.delete(tab.meta.tab_id);
+                    }}
+                    tabId={tab.meta.tab_id}
+                    rowCount={tab.meta.row_count}
+                    showGridChrome={settings.showGridChrome}
+                    freezeHeader={settings.freezeHeader}
+                    freezeCols={settings.freezeCols}
+                    onFreezeColsChange={(freezeCols) => updateSettings({ freezeCols })}
+                    onStatsChange={(stats) => {
+                      updateTab(tab.meta.tab_id, { stats, error: null });
+                      setOpenError(null);
+                    }}
+                    onDirtyChange={(dirty) => updateTab(tab.meta.tab_id, { dirty })}
+                    onError={(message) => updateTab(tab.meta.tab_id, { error: message })}
+                    onRowCountChange={(row_count) => updateTab(tab.meta.tab_id, { meta: { ...tab.meta, row_count } })}
+                    viewActive={tab.filterActive || tab.sortActive}
+                    onSortChange={(active, rowCount) => updateTab(tab.meta.tab_id, { sortActive: active, meta: { ...tab.meta, row_count: rowCount } })}
+                  />
+                </ErrorBoundary>
               </div>
               <StatusBar
                 file={tab.meta}

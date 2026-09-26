@@ -2,6 +2,16 @@
 
 All notable changes to **Gigagrid** will be documented in this file.
 
+## [v0.5.0] - 2026-09-26
+
+### 🚀 Features & Enhancements
+- **Keyboard Shortcuts on Toolbar Buttons**: Added visual shortcut badges to functional toolbar buttons (`⌘O` / `Ctrl+O`, `⌘S` / `Ctrl+S`, `⌘F` / `Ctrl+F`, `⇧⌘F` / `Ctrl+Shift+F`, `⌘L` / `F5`, `⌘Z` / `Ctrl+Z`, `⇧⌘Z` / `Ctrl+Shift+Z`, `⌘N` / `Ctrl+N`) for immediate discoverability and high-efficiency keyboard workflows.
+- **Global Keybindings Expansion**: Implemented global shortcuts for jumping to rows/columns (`Cmd/Ctrl + L` / `F5`), opening the multi-criteria filter popover (`Cmd/Ctrl + Shift + F`), toggling and stepping through search results (`Cmd/Ctrl + G` / `Cmd/Ctrl + Shift + G`), and quick tab cycling.
+- **Toolbar Layout Reorganization**: Reorganized toolbar into distinct functional groups (History/Undo, Data Tools & Inspection, File Management) separated by subtle vertical dividers, moving file actions (`New`, `Open`, `Save`) cleanly to the right side of the toolbar.
+- **Status Bar Version & Updater Anchor**: Relocated the "Check for Updates" version badge from the top toolbar to the bottom-right status bar, streamlining the primary workspace header while keeping update status accessible.
+
+---
+
 ## [v0.4.4] - 2026-09-26
 
 ### 🐛 Bug Fixes

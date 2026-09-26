@@ -12,11 +12,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/AMSComm/GigaGrid/releases"><img src="https://img.shields.io/badge/Release-v0.4.4-396cd8?style=flat-square" alt="Version 0.4.4" /></a>
+  <a href="https://github.com/AMSComm/GigaGrid/releases"><img src="https://img.shields.io/badge/Release-v0.5.0-396cd8?style=flat-square" alt="Version 0.5.0" /></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-10b981?style=flat-square" alt="License MIT" /></a>
   <img src="https://img.shields.io/badge/Desktop-Tauri_v2-22c55e?style=flat-square&logo=tauri" alt="Tauri v2" />
   <img src="https://img.shields.io/badge/Core-Rust_ByteOffset-f97316?style=flat-square&logo=rust" alt="Rust Core" />
-  <img src="https://img.shields.io/badge/Tests-45%2F45_Passed-06b6d4?style=flat-square" alt="Tests 45/45" />
+  <img src="https://img.shields.io/badge/Tests-48%2F48_Passed-06b6d4?style=flat-square" alt="Tests 48/48" />
 </p>
 
 ---
@@ -77,7 +77,7 @@ Download official pre-built packages from [GitHub Releases](https://github.com/A
 - **Windows:** `Gigagrid_x64-setup.exe` / `Gigagrid_x64.msi`
 - **Linux:** `gigagrid_amd64.deb` / `Gigagrid.AppImage`
 
-> 🔄 **In-App Auto-Update:** Built-in updater automatically notifies you of new releases, displays detailed changelogs, tracks download progress, and relaunches the app in one click. Check manually anytime via the **Toolbar Download Icon (⬇️)**.
+> 🔄 **In-App Auto-Update:** Built-in updater automatically notifies you of new releases, displays detailed changelogs, tracks download progress, and relaunches the app in one click. Check manually anytime via the **Status Bar Version button (vX.Y.Z)** at the bottom-right.
 
 ---
 
@@ -118,14 +118,19 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 | Shortcut (Win/Linux) | Shortcut (macOS) | Action |
 |:---|:---|:---|
+| `Ctrl + N` | `Cmd + N` | **New empty tab / document** |
 | `Ctrl + O` | `Cmd + O` | **Open File** dialog |
 | `Ctrl + S` | `Cmd + S` | **Save active document** |
 | `Ctrl + W` | `Cmd + W` | **Close active tab** |
 | `Ctrl + 1 .. 9` | `Cmd + 1 .. 9` | **Switch to tab 1 through 9** |
 | `Ctrl + F` | `Cmd + F` | **Toggle Floating Find & Replace Panel** |
+| `Ctrl + G` | `Cmd + G` | **Find next search match** |
+| `Ctrl + Shift + G` | `Cmd + Shift + G` | **Find previous search match** |
+| `Ctrl + Shift + F` | `Cmd + Shift + F` | **Toggle Multi-Criteria Filter** |
+| `Ctrl + L` / `F5` | `Cmd + L` / `F5` | **Go to Row / Column** |
 | `Enter` | `Enter` | **Enter inline cell edit mode** |
-| `Escape` | `Escape` | **Cancel cell edit / dismiss panel** |
-| `Ctrl + Z` | `Cmd + Z` | **Undo last edit or paste** |
+| `Escape` | `Escape` | **Cancel cell edit / dismiss overlays** |
+| `Ctrl + Z` | `Cmd + Z` | **Undo last edit or structural change** |
 | `Ctrl + Shift + Z` | `Cmd + Shift + Z` | **Redo edit** |
 | `Arrow Keys` | `Arrow Keys` | **Navigate between cells** |
 | `Shift + Arrow Keys` | `Shift + Arrow Keys` | **Multi-cell range selection** |

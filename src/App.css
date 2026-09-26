@@ -98,6 +98,21 @@ button {
   color: #fff;
 }
 
+.toolbar-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.toolbar-divider {
+  width: 1px;
+  height: 16px;
+  background-color: var(--border);
+  margin: 0 4px;
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
 .tab-bar-container {
   display: flex;
   gap: 4px;
@@ -196,6 +211,22 @@ button {
 .status-bar-btn[data-active="true"] {
   background-color: rgba(128, 128, 128, 0.25);
   border-color: var(--border);
+}
+
+.status-bar-version-btn {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  gap: 5px;
+  padding: 1px 6px;
+}
+
+.status-bar-update-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--primary, #396cd8);
+  display: inline-block;
+  flex-shrink: 0;
 }
 
 .status-popover-item {

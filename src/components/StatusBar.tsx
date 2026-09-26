@@ -1,4 +1,6 @@
 import { useState, useEffect } from "react";
+import { CURRENT_VERSION } from "../utils/updater";
+import { getToolbarShortcutLabel } from "../utils/shortcuts";
 
 export interface SelectionInfo {
   rows: number;
@@ -27,6 +29,8 @@ interface StatusBarProps {
   file: StatusFile;
   stats: GridStats;
   error?: string | null;
+  updateAvailable?: boolean;
+  onOpenUpdateDialog?: () => void;
   onReopenWithDelimiter?: (delimiter: string) => void;
   onReopenWithEncoding?: (encoding: string) => void;
   onChangeEncoding?: (encoding: string) => void;
@@ -38,6 +42,8 @@ export function StatusBar({
   file,
   stats,
   error,
+  updateAvailable,
+  onOpenUpdateDialog,
   onReopenWithDelimiter,
   onReopenWithEncoding,
   onChangeEncoding,
@@ -383,6 +389,33 @@ export function StatusBar({
             )}
           </span>
         )}
+
+        <span
+          role="button"
+          tabIndex={0}
+          className="status-bar-btn status-bar-version-btn"
+          style={{ cursor: "pointer" }}
+          onClick={onOpenUpdateDialog}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onOpenUpdateDialog?.();
+            }
+          }}
+          title={
+            updateAvailable
+              ? `Update available! Click or ${getToolbarShortcutLabel("update")} to view (v${CURRENT_VERSION})`
+              : `Gigagrid v${CURRENT_VERSION} (${getToolbarShortcutLabel("update")})`
+          }
+          aria-label={
+            updateAvailable
+              ? `Update available! Click to view (v${CURRENT_VERSION})`
+              : `Gigagrid v${CURRENT_VERSION}`
+          }
+        >
+          <span>v{CURRENT_VERSION}</span>
+          {updateAvailable && <span className="status-bar-update-dot" />}
+        </span>
       </div>
     </div>
   );

@@ -5,7 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import { UpdateDialog } from "./components/UpdateDialog";
-import { checkForAppUpdates } from "./utils/updater";
+import { checkForAppUpdates, CURRENT_VERSION } from "./utils/updater";
 import { Grid, type GridHandle } from "./components/Grid";
 import { Toolbar } from "./components/Toolbar";
 import { SearchPanel, type SearchPanelHandle } from "./components/SearchPanel";
@@ -13,7 +13,7 @@ import { StatusBar, type GridStats } from "./components/StatusBar";
 import { loadSettings, saveSettings, pushRecentFile, type Settings, type Theme } from "./settings";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { getToolbarShortcutLabel } from "./utils/shortcuts";
-import { IconFolder, IconSave, IconMonitor, IconSun, IconMoon, IconGrid, IconPin, IconDownload, IconClock } from "./icons";
+import { IconFolder, IconSave, IconMonitor, IconSun, IconMoon, IconGrid, IconPin, IconClock } from "./icons";
 import {
   findExistingTab,
   getAdjacentTabIndex,
@@ -718,49 +718,91 @@ function App() {
             Saved {activeTab.savedAt.toLocaleTimeString()}
           </span>
         )}
-        {activeTab && (
-          <div style={{ display: "flex", gap: 4, alignItems: "center", flexShrink: 0 }}>
-            <Toolbar
-              key={activeTab.meta.tab_id}
-              tabId={activeTab.meta.tab_id}
-              totalCols={activeTab.stats.totalCols}
-              visible={showSearch}
-              showFilter={showFilter}
-              onToggleFilter={() => {
-                setShowFilter((v) => !v);
-                setShowGoto(false);
-                setShowRecent(false);
-              }}
-              onCloseFilter={() => setShowFilter(false)}
-              showGoto={showGoto}
-              onToggleGoto={() => {
-                setShowGoto((v) => !v);
-                setShowFilter(false);
-                setShowRecent(false);
-              }}
-              onCloseGoto={() => setShowGoto(false)}
-              onNavigate={(row, col) => handleNavigateFor(activeTab.meta.tab_id, row, col)}
-              onToggleSearch={() => {
-                setShowFilter(false);
-                setShowGoto(false);
-                setShowRecent(false);
-                toggleSearch();
-              }}
-              viewActive={activeTab.filterActive || activeTab.sortActive}
-              onFilterChange={(active, rowCount) => {
-                updateTab(activeTab.meta.tab_id, {
-                  filterActive: active,
-                  meta: { ...activeTab.meta, row_count: rowCount },
-                });
-                gridRefs.current.get(activeTab.meta.tab_id)?.invalidateCache();
-              }}
-            />
-          </div>
-        )}
-        <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-          <div style={{ position: "relative" }} className="recent-popover-anchor">
+        <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0, marginLeft: "auto" }}>
+          {/* Group 1: Data / Navigation Tools */}
+          {activeTab && (
+            <>
+              <div className="toolbar-group" role="group" aria-label="Data tools">
+                <Toolbar
+                  key={activeTab.meta.tab_id}
+                  tabId={activeTab.meta.tab_id}
+                  totalCols={activeTab.stats.totalCols}
+                  visible={showSearch}
+                  showFilter={showFilter}
+                  onToggleFilter={() => {
+                    setShowFilter((v) => !v);
+                    setShowGoto(false);
+                    setShowRecent(false);
+                  }}
+                  onCloseFilter={() => setShowFilter(false)}
+                  showGoto={showGoto}
+                  onToggleGoto={() => {
+                    setShowGoto((v) => !v);
+                    setShowFilter(false);
+                    setShowRecent(false);
+                  }}
+                  onCloseGoto={() => setShowGoto(false)}
+                  onNavigate={(row, col) => handleNavigateFor(activeTab.meta.tab_id, row, col)}
+                  onToggleSearch={() => {
+                    setShowFilter(false);
+                    setShowGoto(false);
+                    setShowRecent(false);
+                    toggleSearch();
+                  }}
+                  viewActive={activeTab.filterActive || activeTab.sortActive}
+                  onFilterChange={(active, rowCount) => {
+                    updateTab(activeTab.meta.tab_id, {
+                      filterActive: active,
+                      meta: { ...activeTab.meta, row_count: rowCount },
+                    });
+                    gridRefs.current.get(activeTab.meta.tab_id)?.invalidateCache();
+                  }}
+                />
+              </div>
+              <div className="toolbar-divider" />
+            </>
+          )}
+
+          {/* Group 2: View & Appearance */}
+          <div className="toolbar-group" role="group" aria-label="View options">
             <button
               className="icon-btn"
+              data-action="toggle-grid-lines"
+              data-active={settings.showGridChrome}
+              title={`Toggle grid lines (${getToolbarShortcutLabel("gridLines")})`}
+              aria-label={`Toggle grid lines (${getToolbarShortcutLabel("gridLines")})`}
+              onClick={toggleGridChrome}
+            >
+              <IconGrid />
+            </button>
+            <button
+              className="icon-btn"
+              data-action="toggle-freeze-header"
+              data-active={settings.freezeHeader}
+              title={`Toggle freeze header (${getToolbarShortcutLabel("freezeHeader")})`}
+              aria-label={`Toggle freeze header (${getToolbarShortcutLabel("freezeHeader")})`}
+              onClick={toggleFreezeHeader}
+            >
+              <IconPin />
+            </button>
+            <button
+              className="icon-btn"
+              data-action="cycle-theme"
+              title={`Theme: ${settings.theme} (${getToolbarShortcutLabel("theme")})`}
+              aria-label={`Theme: ${settings.theme} (${getToolbarShortcutLabel("theme")})`}
+              onClick={cycleTheme}
+            >
+              <ThemeIcon />
+            </button>
+          </div>
+
+          <div className="toolbar-divider" />
+
+          {/* Group 3: File Operations (Outer right corner) */}
+          <div className="toolbar-group" role="group" aria-label="File operations">
+            <button
+              className="icon-btn"
+              data-action="open-file"
               title={`Open file (${getToolbarShortcutLabel("open")})`}
               aria-label={`Open file (${getToolbarShortcutLabel("open")})`}
               onClick={openFile}
@@ -768,116 +810,74 @@ function App() {
             >
               <IconFolder />
             </button>
-            <button
-              className="icon-btn"
-              data-active={showRecent}
-              title={`Recent files (${getToolbarShortcutLabel("recent")})`}
-              aria-label={`Recent files (${getToolbarShortcutLabel("recent")})`}
-              onClick={() => {
-                setShowRecent((v) => !v);
-                setShowFilter(false);
-                setShowGoto(false);
-              }}
-              disabled={settings.recentFiles.length === 0}
-            >
-              <IconClock />
-            </button>
-            {showRecent && settings.recentFiles.length > 0 && (
-              <div
-                style={{
-                  position: "absolute",
-                  top: "calc(100% + 4px)",
-                  left: 0,
-                  zIndex: 10,
-                  display: "flex",
-                  flexDirection: "column",
-                  minWidth: 220,
-                  background: "var(--bg)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 4,
-                  boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
-                  padding: 4,
+            <div style={{ position: "relative" }} className="recent-popover-anchor">
+              <button
+                className="icon-btn"
+                data-action="recent-files"
+                data-active={showRecent}
+                title={`Recent files (${getToolbarShortcutLabel("recent")})`}
+                aria-label={`Recent files (${getToolbarShortcutLabel("recent")})`}
+                onClick={() => {
+                  setShowRecent((v) => !v);
+                  setShowFilter(false);
+                  setShowGoto(false);
                 }}
+                disabled={settings.recentFiles.length === 0}
               >
-                {settings.recentFiles.map((p) => (
-                  <button
-                    key={p}
-                    onClick={() => {
-                      setShowRecent(false);
-                      openFileAsNewTab(p);
-                    }}
-                    style={{ textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                    title={p}
-                  >
-                    {p.split(/[\\/]/).pop()}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          {activeTab && (
+                <IconClock />
+              </button>
+              {showRecent && settings.recentFiles.length > 0 && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "calc(100% + 4px)",
+                    right: 0,
+                    zIndex: 50,
+                    display: "flex",
+                    flexDirection: "column",
+                    minWidth: 220,
+                    background: "var(--bg)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 4,
+                    boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
+                    padding: 4,
+                  }}
+                >
+                  {settings.recentFiles.map((p) => (
+                    <button
+                      key={p}
+                      onClick={() => {
+                        setShowRecent(false);
+                        openFileAsNewTab(p);
+                      }}
+                      style={{ textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                      title={p}
+                    >
+                      {p.split(/[\\/]/).pop()}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <button
               className="icon-btn"
-              title={activeTab.saving ? "Saving…" : `Save (${getToolbarShortcutLabel("save")})`}
+              data-action="save-file"
+              title={
+                !activeTab
+                  ? "Save (no active file)"
+                  : activeTab.saving
+                    ? "Saving…"
+                    : `Save (${getToolbarShortcutLabel("save")})`
+              }
               aria-label={`Save (${getToolbarShortcutLabel("save")})`}
-              onClick={() => saveFile(activeTab.meta.tab_id)}
-              disabled={activeTab.saving}
+              onClick={() => {
+                if (activeTab) saveFile(activeTab.meta.tab_id);
+              }}
+              disabled={!activeTab || activeTab.saving}
             >
               <IconSave />
             </button>
-          )}
-          <button
-            className="icon-btn"
-            data-active={settings.showGridChrome}
-            title={`Toggle grid lines (${getToolbarShortcutLabel("gridLines")})`}
-            aria-label={`Toggle grid lines (${getToolbarShortcutLabel("gridLines")})`}
-            onClick={toggleGridChrome}
-          >
-            <IconGrid />
-          </button>
-          <button
-            className="icon-btn"
-            data-active={settings.freezeHeader}
-            title={`Toggle freeze header (${getToolbarShortcutLabel("freezeHeader")})`}
-            aria-label={`Toggle freeze header (${getToolbarShortcutLabel("freezeHeader")})`}
-            onClick={toggleFreezeHeader}
-          >
-            <IconPin />
-          </button>
-          <button
-            className="icon-btn"
-            title={`Theme: ${settings.theme} (${getToolbarShortcutLabel("theme")})`}
-            aria-label={`Theme: ${settings.theme} (${getToolbarShortcutLabel("theme")})`}
-            onClick={cycleTheme}
-          >
-            <ThemeIcon />
-          </button>
-          <button
-            className="icon-btn"
-            style={{ position: "relative" }}
-            title={
-              updateAvailable
-                ? `Update available! Click or ${getToolbarShortcutLabel("update")} to view`
-                : `Check for updates (${getToolbarShortcutLabel("update")})`
-            }
-            aria-label={`Check for updates (${getToolbarShortcutLabel("update")})`}
-            onClick={() => setShowUpdateDialog(true)}
-          >
-            <IconDownload />
-            {updateAvailable && (
-              <span
-                style={{
-                  position: "absolute",
-                  top: 4,
-                  right: 4,
-                  width: 6,
-                  height: 6,
-                  borderRadius: "50%",
-                  backgroundColor: "var(--primary)",
-                }}
-              />
-            )}
-          </button>
+          </div>
         </div>
       </div>
       <div style={{ position: "relative", display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
@@ -917,6 +917,8 @@ function App() {
                 file={tab.meta}
                 stats={tab.stats}
                 error={isActive ? (tab.error ?? openError) : tab.error}
+                updateAvailable={updateAvailable}
+                onOpenUpdateDialog={() => setShowUpdateDialog(true)}
                 onReopenWithDelimiter={(d) => reopenWithDelimiter(tab.meta.tab_id, d)}
                 onReopenWithEncoding={(enc) => reopenWithEncoding(tab.meta.tab_id, enc)}
                 onChangeEncoding={(enc) => changeEncoding(tab.meta.tab_id, enc)}
@@ -938,17 +940,49 @@ function App() {
           />
         )}
       </div>
-      {tabs.length === 0 && openError && (
+      {tabs.length === 0 && (
         <div
           style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
             padding: "2px 8px",
             borderTop: "1px solid var(--border)",
             fontSize: 12,
-            color: "red",
+            lineHeight: "16px",
             flexShrink: 0,
+            background: "var(--bg)",
           }}
         >
-          {openError}
+          <span style={{ color: "var(--danger, #d93025)", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>
+            {openError || ""}
+          </span>
+          <span
+            role="button"
+            tabIndex={0}
+            className="status-bar-btn status-bar-version-btn"
+            style={{ cursor: "pointer", marginLeft: "auto" }}
+            onClick={() => setShowUpdateDialog(true)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setShowUpdateDialog(true);
+              }
+            }}
+            title={
+              updateAvailable
+                ? `Update available! Click or ${getToolbarShortcutLabel("update")} to view (v${CURRENT_VERSION})`
+                : `Gigagrid v${CURRENT_VERSION} (${getToolbarShortcutLabel("update")})`
+            }
+            aria-label={
+              updateAvailable
+                ? `Update available! Click to view (v${CURRENT_VERSION})`
+                : `Gigagrid v${CURRENT_VERSION}`
+            }
+          >
+            <span>v{CURRENT_VERSION}</span>
+            {updateAvailable && <span className="status-bar-update-dot" />}
+          </span>
         </div>
       )}
       {isDragging && (

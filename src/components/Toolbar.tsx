@@ -123,10 +123,22 @@ export function Toolbar({
 
   return (
     <>
+      <button
+        className="icon-btn"
+        data-action="search"
+        data-active={visible}
+        title={`Search (${getToolbarShortcutLabel("search")})`}
+        aria-label={`Search (${getToolbarShortcutLabel("search")})`}
+        onClick={onToggleSearch}
+      >
+        <IconSearch />
+      </button>
+
       {/* Filter Popover Anchor */}
       <div style={{ position: "relative" }} className="filter-popover-anchor">
         <button
           className="icon-btn"
+          data-action="filter"
           data-active={showFilter || appliedCount > 0}
           title={
             appliedCount > 0
@@ -321,19 +333,10 @@ export function Toolbar({
         )}
       </div>
 
-      <button
-        className="icon-btn"
-        data-active={visible}
-        title={`Search (${getToolbarShortcutLabel("search")})`}
-        aria-label={`Search (${getToolbarShortcutLabel("search")})`}
-        onClick={onToggleSearch}
-      >
-        <IconSearch />
-      </button>
-
       <div style={{ position: "relative" }} className="goto-popover-anchor">
         <button
           className="icon-btn"
+          data-action="goto"
           data-active={showGoto}
           title={`Go to row/col (${getToolbarShortcutLabel("goto")})`}
           aria-label={`Go to row/col (${getToolbarShortcutLabel("goto")})`}

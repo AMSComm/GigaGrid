@@ -282,7 +282,7 @@ async function main() {
     await page.addInitScript(INIT_SCRIPT);
     await page.goto(URL);
 
-    await page.click('button[title="Open file"]');
+    await page.click('button[data-action="open-file"], button[title*="Open file"]');
     await page.waitForSelector("text=rows", { timeout: 5000 });
     await page.waitForTimeout(500); // let get_rows fetch + render settle
 
@@ -1152,7 +1152,7 @@ async function main() {
     await page.screenshot({ path: path.join(OUT_DIR, "sort-active.png") });
 
     // --- Check 20: recent-files dropdown lists the opened file, click reopens it ---
-    const recentBtn = await page.$('button[title="Recent files"]');
+    const recentBtn = await page.$('button[data-action="recent-files"], button[title*="Recent files"]');
     console.log("Recent-files button enabled after a file was opened (expect true):", recentBtn ? !(await recentBtn.evaluate((b) => b.disabled)) : false);
     await recentBtn.click();
     await page.waitForTimeout(150);

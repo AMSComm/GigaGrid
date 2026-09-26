@@ -2,6 +2,14 @@
 
 All notable changes to **Gigagrid** will be documented in this file.
 
+## [v0.4.4] - 2026-09-26
+
+### 🐛 Bug Fixes
+- **Sticky Chrome TopCover in Virtual Scroll Bounds**: Fixed an issue where the very last row in massive datasets (e.g. 2,000,000 rows) was cut off and could not be scrolled completely into view. Included the height of sticky column headers and frozen rows (`topCover`) into both physical and virtual scroll boundary computations, ensuring the last row sits 100% flush at the bottom of the viewport with zero clipping.
+- **Frozen Header Container DOM Stabilization**: Ensured the frozen header bar container remains stable in the DOM with placeholders while row 0 loads asynchronously, eliminating layout jitter and preserving exact scroll coordinates from initial render.
+
+---
+
 ## [v0.4.3] - 2026-09-25
 
 ### 🐛 Bug Fixes

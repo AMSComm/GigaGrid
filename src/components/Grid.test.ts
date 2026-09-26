@@ -247,5 +247,61 @@ describe("virtual scroll scaling (handling > 1 million rows)", () => {
     expect(window.start).toBeLessThanOrEqual(targetRow);
     expect(window.start + window.count).toBeGreaterThan(targetRow);
   });
+
+  it("accounts for topCover (sticky header/frozen row) so the last row is never clipped", () => {
+    // When sticky header consumes 28px in normal flow:
+    const totalRows = 2000000;
+    const rowHeight = 28;
+    const viewportHeight = 800;
+    const topCover = 28; // showGridChrome = true
+
+    const metrics = computeScrollMetrics(totalRows, rowHeight, viewportHeight, topCover);
+    expect(metrics.topCover).toBe(28);
+    // Container height is capped at 15M
+    expect(metrics.containerHeight).toBe(MAX_SCROLL_CONTAINER_HEIGHT);
+    // Max physical scroll includes topCover
+    expect(metrics.maxPhysicalScroll).toBe(topCover + MAX_SCROLL_CONTAINER_HEIGHT - viewportHeight);
+    // Max virtual scroll includes topCover
+    expect(metrics.maxVirtualScroll).toBe(topCover + totalRows * rowHeight - viewportHeight);
+
+    // When scrolled to bottom:
+    const physicalScrollTop = metrics.maxPhysicalScroll;
+    const virtualScrollTop = physicalToVirtualScrollTop(physicalScrollTop, metrics);
+    expect(virtualScrollTop).toBe(metrics.maxVirtualScroll);
+
+    // Compute DOM position for the very last row (row 2,000,000, offset 1,999,999)
+    const lastRowOffset = totalRows - 1;
+    const domTop = computeDomRowTop(
+      lastRowOffset,
+      rowHeight,
+      physicalScrollTop,
+      virtualScrollTop,
+      metrics.isScaled,
+    );
+
+    // Inside the scroll container, spacer div sits at topCover.
+    // Visual Y on screen = (topCover + domTop) - physicalScrollTop.
+    const visualY = topCover + domTop - physicalScrollTop;
+    const visualBottom = visualY + rowHeight;
+
+    // The bottom edge of the last row must align EXACTLY with the viewport bottom (800px)
+    expect(visualBottom).toBe(viewportHeight);
+
+    // Also check with freezeHeader enabled (topCover = 56px, 2 sticky bars)
+    const freezeTopCover = 56;
+    const freezeScrollableRows = totalRows - 1;
+    const freezeMetrics = computeScrollMetrics(freezeScrollableRows, rowHeight, viewportHeight, freezeTopCover);
+    const freezeLastRowOffset = freezeScrollableRows - 1;
+    const freezeDomTop = computeDomRowTop(
+      freezeLastRowOffset,
+      rowHeight,
+      freezeMetrics.maxPhysicalScroll,
+      freezeMetrics.maxVirtualScroll,
+      freezeMetrics.isScaled,
+    );
+    const freezeVisualY = freezeTopCover + freezeDomTop - freezeMetrics.maxPhysicalScroll;
+    const freezeVisualBottom = freezeVisualY + rowHeight;
+    expect(freezeVisualBottom).toBe(viewportHeight);
+  });
 });
 

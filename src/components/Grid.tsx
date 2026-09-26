@@ -39,6 +39,7 @@ export interface ScrollMetrics {
   totalRows: number;
   rowHeight: number;
   viewportHeight: number;
+  topCover: number;
   modelHeight: number;
   containerHeight: number;
   maxPhysicalScroll: number;
@@ -51,6 +52,7 @@ export function computeScrollMetrics(
   totalRows: number,
   rowHeight: number,
   viewportHeight: number,
+  topCover: number = 0,
   maxContainerHeight: number = MAX_SCROLL_CONTAINER_HEIGHT,
 ): ScrollMetrics {
   const modelHeight = Math.max(0, totalRows * rowHeight);
@@ -59,6 +61,7 @@ export function computeScrollMetrics(
       totalRows,
       rowHeight,
       viewportHeight,
+      topCover,
       modelHeight,
       containerHeight: modelHeight,
       maxPhysicalScroll: 0,
@@ -70,14 +73,15 @@ export function computeScrollMetrics(
 
   const isScaled = modelHeight > maxContainerHeight;
   const containerHeight = isScaled ? maxContainerHeight : modelHeight;
-  const maxPhysicalScroll = Math.max(0, containerHeight - viewportHeight);
-  const maxVirtualScroll = Math.max(0, modelHeight - viewportHeight);
+  const maxPhysicalScroll = Math.max(0, topCover + containerHeight - viewportHeight);
+  const maxVirtualScroll = Math.max(0, topCover + modelHeight - viewportHeight);
   const scale = isScaled && maxPhysicalScroll > 0 ? maxVirtualScroll / maxPhysicalScroll : 1;
 
   return {
     totalRows,
     rowHeight,
     viewportHeight,
+    topCover,
     modelHeight,
     containerHeight,
     maxPhysicalScroll,
@@ -232,7 +236,8 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({ tabId, row
   // range, and each row's rendered `top` all agreeing on the same coordinate
   // space (offset 0 = the first SCROLLABLE row, i.e. logical row 1 here).
   const scrollableRowCount = freezeHeader ? Math.max(0, rowCount - 1) : rowCount;
-  const metrics = computeScrollMetrics(scrollableRowCount, rowHeight, viewportHeight);
+  const topCover = (showGridChrome ? HEADER_HEIGHT : 0) + (freezeHeader && rowCount > 0 ? HEADER_HEIGHT : 0);
+  const metrics = computeScrollMetrics(scrollableRowCount, rowHeight, viewportHeight, topCover);
   const virtualScrollTop = physicalToVirtualScrollTop(scrollTop, metrics);
   const range = computeWindow(virtualScrollTop, rowHeight, viewportHeight, scrollableRowCount, OVERSCAN);
 
@@ -354,7 +359,6 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({ tabId, row
     // not just the local offset*rowHeight / summed colWidths. Omitting this
     // here previously under-scrolled by exactly that many px, leaving the
     // target cell still clipped at the bottom/right edge after "jumping" to it.
-    const topCover = (showGridChrome ? HEADER_HEIGHT : 0) + (freezeHeader ? HEADER_HEIGHT : 0);
     const virtualRowTop = topCover + offset * rowHeight;
     const virtualRowBottom = virtualRowTop + rowHeight;
     const visibleTop = virtualScrollTop + topCover;
@@ -981,7 +985,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({ tabId, row
           ))}
         </div>
       )}
-      {freezeHeader && frozenRow && (
+      {freezeHeader && rowCount > 0 && (
         <div
           style={{
             position: "sticky",
@@ -1014,24 +1018,39 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({ tabId, row
               1
             </div>
           )}
-          {frozenRow.map((cell, ci) => (
-            <div key={ci} style={{ position: "relative", flexShrink: 0, width: colWidths[ci] ?? DEFAULT_COL_WIDTH, ...chromeBorder, ...(ci < freezeCols ? {
-              position: "sticky" as const,
-              left: frozenLeft(ci),
-              zIndex: 1,
-              background: "var(--bg)",
-              ...(ci === freezeCols - 1 ? { borderRight: "2px solid var(--border)" } : {}),
-            } : {}) }}>
-              <Cell
-                value={cell}
-                editing={editingCell?.row === 0 && editingCell?.col === ci}
-                onRequestEdit={() => requestEdit(0, ci)}
-                onCommit={(v) => commitCell(0, ci, v)}
-                onOverflow={() => handleOverflow(0)}
-                onEditEnd={endEdit}
-              />
-            </div>
-          ))}
+          {frozenRow ? (
+            frozenRow.map((cell, ci) => (
+              <div
+                key={ci}
+                style={{
+                  position: "relative",
+                  flexShrink: 0,
+                  width: colWidths[ci] ?? DEFAULT_COL_WIDTH,
+                  ...chromeBorder,
+                  ...(ci < freezeCols
+                    ? {
+                        position: "sticky" as const,
+                        left: frozenLeft(ci),
+                        zIndex: 1,
+                        background: "var(--bg)",
+                        ...(ci === freezeCols - 1 ? { borderRight: "2px solid var(--border)" } : {}),
+                      }
+                    : {}),
+                }}
+              >
+                <Cell
+                  value={cell}
+                  editing={editingCell?.row === 0 && editingCell?.col === ci}
+                  onRequestEdit={() => requestEdit(0, ci)}
+                  onCommit={(v) => commitCell(0, ci, v)}
+                  onOverflow={() => handleOverflow(0)}
+                  onEditEnd={endEdit}
+                />
+              </div>
+            ))
+          ) : (
+            <div style={{ padding: "0 6px", opacity: 0.4, display: "flex", alignItems: "center" }}>…</div>
+          )}
         </div>
       )}
       <div style={{ height: totalHeight, position: "relative" }}>

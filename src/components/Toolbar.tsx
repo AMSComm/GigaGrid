@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { IconSearch, IconHash, IconFilter } from "../icons";
+import { getToolbarShortcutLabel } from "../utils/shortcuts";
 
 export interface FilterRule {
   id: number;
@@ -12,6 +13,12 @@ interface ToolbarProps {
   tabId: number;
   totalCols: number;
   visible: boolean;
+  showFilter: boolean;
+  onToggleFilter: () => void;
+  onCloseFilter: () => void;
+  showGoto: boolean;
+  onToggleGoto: () => void;
+  onCloseGoto: () => void;
   onNavigate: (row: number, col?: number) => void;
   onToggleSearch: () => void;
   viewActive: boolean;
@@ -22,13 +29,17 @@ export function Toolbar({
   tabId,
   totalCols,
   visible,
+  showFilter,
+  onToggleFilter,
+  onCloseFilter,
+  showGoto,
+  onToggleGoto,
+  onCloseGoto,
   onNavigate,
   onToggleSearch,
   viewActive: _viewActive,
   onFilterChange,
 }: ToolbarProps) {
-  const [showGoto, setShowGoto] = useState(false);
-  const [showFilter, setShowFilter] = useState(false);
   const [gotoRow, setGotoRow] = useState("");
   const [gotoCol, setGotoCol] = useState("");
 
@@ -41,28 +52,20 @@ export function Toolbar({
   useEffect(() => {
     function onDocClick(e: MouseEvent) {
       const target = e.target as HTMLElement | null;
-      if (!target?.closest(".filter-popover-anchor")) {
-        setShowFilter(false);
+      if (showFilter && !target?.closest(".filter-popover-anchor")) {
+        onCloseFilter();
       }
-      if (!target?.closest(".goto-popover-anchor")) {
-        setShowGoto(false);
-      }
-    }
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        setShowFilter(false);
-        setShowGoto(false);
+      if (showGoto && !target?.closest(".goto-popover-anchor")) {
+        onCloseGoto();
       }
     }
     if (showFilter || showGoto) {
       window.addEventListener("click", onDocClick);
-      window.addEventListener("keydown", onKeyDown);
     }
     return () => {
       window.removeEventListener("click", onDocClick);
-      window.removeEventListener("keydown", onKeyDown);
     };
-  }, [showFilter, showGoto]);
+  }, [showFilter, showGoto, onCloseFilter, onCloseGoto]);
 
   function submitGoto(e: React.FormEvent) {
     e.preventDefault();
@@ -71,7 +74,7 @@ export function Toolbar({
     const col = gotoCol ? parseInt(gotoCol, 10) : undefined;
     invoke("goto", { tabId, row }).then(() => {
       onNavigate(row, col);
-      setShowGoto(false);
+      onCloseGoto();
     });
   }
 
@@ -83,7 +86,7 @@ export function Toolbar({
     invoke<number>("set_filters", { tabId, filters: activeCriteria }).then((rowCount) => {
       setAppliedCount(activeCriteria.length);
       onFilterChange(activeCriteria.length > 0, rowCount);
-      setShowFilter(false);
+      onCloseFilter();
     });
   }
 
@@ -92,7 +95,7 @@ export function Toolbar({
       setFilterRules([{ id: nextRuleId.current++, col: null, query: "" }]);
       setAppliedCount(0);
       onFilterChange(false, rowCount);
-      setShowFilter(false);
+      onCloseFilter();
     });
   }
 
@@ -125,11 +128,13 @@ export function Toolbar({
         <button
           className="icon-btn"
           data-active={showFilter || appliedCount > 0}
-          title={appliedCount > 0 ? `Filters (${appliedCount} active)` : "Filters"}
-          onClick={() => {
-            setShowFilter((v) => !v);
-            setShowGoto(false);
-          }}
+          title={
+            appliedCount > 0
+              ? `Filters (${appliedCount} active) (${getToolbarShortcutLabel("filter")})`
+              : `Filters (${getToolbarShortcutLabel("filter")})`
+          }
+          aria-label={`Filters (${getToolbarShortcutLabel("filter")})`}
+          onClick={onToggleFilter}
         >
           <IconFilter />
         </button>
@@ -163,11 +168,16 @@ export function Toolbar({
               }}
             >
               <span>Filter Criteria</span>
-              {appliedCount > 0 && (
-                <span style={{ fontSize: 11, opacity: 0.7, fontWeight: 400 }}>
-                  {appliedCount} active
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                {appliedCount > 0 && (
+                  <span style={{ fontSize: 11, opacity: 0.7, fontWeight: 400 }}>
+                    {appliedCount} active
+                  </span>
+                )}
+                <span style={{ fontSize: 11, opacity: 0.5, fontWeight: 400 }}>
+                  {getToolbarShortcutLabel("filter")}
                 </span>
-              )}
+              </div>
             </div>
 
             <div
@@ -314,7 +324,8 @@ export function Toolbar({
       <button
         className="icon-btn"
         data-active={visible}
-        title="Search (Cmd/Ctrl+F)"
+        title={`Search (${getToolbarShortcutLabel("search")})`}
+        aria-label={`Search (${getToolbarShortcutLabel("search")})`}
         onClick={onToggleSearch}
       >
         <IconSearch />
@@ -324,11 +335,9 @@ export function Toolbar({
         <button
           className="icon-btn"
           data-active={showGoto}
-          title="Go to row/col"
-          onClick={() => {
-            setShowGoto((v) => !v);
-            setShowFilter(false);
-          }}
+          title={`Go to row/col (${getToolbarShortcutLabel("goto")})`}
+          aria-label={`Go to row/col (${getToolbarShortcutLabel("goto")})`}
+          onClick={onToggleGoto}
         >
           <IconHash />
         </button>
@@ -336,7 +345,7 @@ export function Toolbar({
           <form
             onSubmit={submitGoto}
             onKeyDown={(e) => {
-              if (e.key === "Escape") setShowGoto(false);
+              if (e.key === "Escape") onCloseGoto();
             }}
             style={{
               position: "absolute",

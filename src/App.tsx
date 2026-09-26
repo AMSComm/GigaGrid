@@ -12,6 +12,7 @@ import { SearchPanel, type SearchPanelHandle } from "./components/SearchPanel";
 import { StatusBar, type GridStats } from "./components/StatusBar";
 import { loadSettings, saveSettings, pushRecentFile, type Settings, type Theme } from "./settings";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { getToolbarShortcutLabel } from "./utils/shortcuts";
 import { IconFolder, IconSave, IconMonitor, IconSun, IconMoon, IconGrid, IconPin, IconDownload, IconClock } from "./icons";
 import {
   findExistingTab,
@@ -53,6 +54,8 @@ function App() {
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [showRecent, setShowRecent] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
+  const [showFilter, setShowFilter] = useState(false);
+  const [showGoto, setShowGoto] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const gridRefs = useRef<Map<number, GridHandle>>(new Map());
   const searchPanelRef = useRef<SearchPanelHandle>(null);
@@ -67,6 +70,24 @@ function App() {
   useEffect(() => {
     document.documentElement.dataset.theme = settings.theme;
   }, [settings.theme]);
+
+  useEffect(() => {
+    setShowFilter(false);
+    setShowGoto(false);
+    setShowRecent(false);
+  }, [activeTabId]);
+
+  useEffect(() => {
+    if (!showRecent) return;
+    const onDocClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target?.closest(".recent-popover-anchor")) {
+        setShowRecent(false);
+      }
+    };
+    window.addEventListener("click", onDocClick);
+    return () => window.removeEventListener("click", onDocClick);
+  }, [showRecent]);
 
   useEffect(() => {
     let isMounted = true;
@@ -169,6 +190,32 @@ function App() {
     });
   }
 
+  function toggleGridChrome() {
+    setSettings((prev) => {
+      const next = { ...prev, showGridChrome: !prev.showGridChrome };
+      saveSettings(next);
+      return next;
+    });
+  }
+
+  function toggleFreezeHeader() {
+    setSettings((prev) => {
+      const next = { ...prev, freezeHeader: !prev.freezeHeader };
+      saveSettings(next);
+      return next;
+    });
+  }
+
+  function cycleTheme() {
+    setSettings((prev) => {
+      const order: Theme[] = ["system", "light", "dark"];
+      const next = order[(order.indexOf(prev.theme) + 1) % order.length];
+      const updated = { ...prev, theme: next };
+      saveSettings(updated);
+      return updated;
+    });
+  }
+
   useEffect(() => {
     function isEditingText(): boolean {
       const el = document.activeElement;
@@ -184,6 +231,46 @@ function App() {
       if (mod && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "o") {
         e.preventDefault();
         openFile();
+        return;
+      }
+
+      // Recent files: Cmd+Shift+O / Ctrl+Shift+O
+      if (mod && !e.altKey && e.shiftKey && e.key.toLowerCase() === "o") {
+        e.preventDefault();
+        setShowRecent((v) => !v);
+        setShowFilter(false);
+        setShowGoto(false);
+        return;
+      }
+
+      // Toggle Theme: Cmd+Shift+T / Ctrl+Shift+T
+      if (mod && !e.altKey && e.shiftKey && e.key.toLowerCase() === "t") {
+        e.preventDefault();
+        cycleTheme();
+        return;
+      }
+
+      // Check for updates: Cmd+Shift+U / Ctrl+Shift+U
+      if (mod && !e.altKey && e.shiftKey && e.key.toLowerCase() === "u") {
+        e.preventDefault();
+        setShowUpdateDialog(true);
+        return;
+      }
+
+      // Toggle Grid lines: Cmd+Alt+G / Ctrl+Alt+G OR Cmd+Shift+B / Ctrl+Shift+B
+      if (
+        (mod && e.altKey && !e.shiftKey && e.key.toLowerCase() === "g") ||
+        (mod && !e.altKey && e.shiftKey && e.key.toLowerCase() === "b")
+      ) {
+        e.preventDefault();
+        toggleGridChrome();
+        return;
+      }
+
+      // Toggle Freeze header: Cmd+Shift+H / Ctrl+Shift+H
+      if (mod && !e.altKey && e.shiftKey && e.key.toLowerCase() === "h") {
+        e.preventDefault();
+        toggleFreezeHeader();
         return;
       }
 
@@ -244,11 +331,31 @@ function App() {
       // Cmd+F: Toggle search panel; when opening -> select all
       if (mod && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "f") {
         e.preventDefault();
+        setShowFilter(false);
+        setShowGoto(false);
         toggleSearch();
         return;
       }
 
-      // Cmd+G and Cmd+Shift+G:
+      // 4. Filter shortcut: Cmd+Shift+F / Ctrl+Shift+F
+      if (mod && !e.altKey && e.shiftKey && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        setShowGoto(false);
+        setShowRecent(false);
+        setShowFilter((v) => !v);
+        return;
+      }
+
+      // 5. Go to row/col: Cmd+L / Ctrl+L OR F5
+      if ((mod && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "l") || e.key === "F5") {
+        e.preventDefault();
+        setShowFilter(false);
+        setShowRecent(false);
+        setShowGoto((v) => !v);
+        return;
+      }
+
+      // 6. Cmd+G and Cmd+Shift+G:
       // If search not open -> open it and jump next/prev
       // If search open -> jump next/prev
       if (mod && !e.altKey && e.key.toLowerCase() === "g") {
@@ -266,17 +373,35 @@ function App() {
         return;
       }
 
-      // Escape: close search panel if open
-      if (e.key === "Escape" && showSearch) {
-        e.preventDefault();
-        setShowSearch(false);
-        return;
+      // 7. Escape: close search panel, recent files, filter, or goto if open
+      if (e.key === "Escape") {
+        let handled = false;
+        if (showSearch) {
+          setShowSearch(false);
+          handled = true;
+        }
+        if (showFilter) {
+          setShowFilter(false);
+          handled = true;
+        }
+        if (showGoto) {
+          setShowGoto(false);
+          handled = true;
+        }
+        if (showRecent) {
+          setShowRecent(false);
+          handled = true;
+        }
+        if (handled) {
+          e.preventDefault();
+          return;
+        }
       }
     }
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activeTabId, tabs, showSearch]);
+  }, [activeTabId, tabs, showSearch, showFilter, showGoto, showRecent]);
 
   function updateSettings(patch: Partial<Settings>) {
     setSettings((prev) => {
@@ -300,12 +425,6 @@ function App() {
       active = false;
     };
   }, []);
-
-  function cycleTheme() {
-    const order: Theme[] = ["system", "light", "dark"];
-    const next = order[(order.indexOf(settings.theme) + 1) % order.length];
-    updateSettings({ theme: next });
-  }
 
   function updateTab(tabId: number, patch: Partial<Tab>) {
     setTabs((prev) => prev.map((t) => (t.meta.tab_id === tabId ? { ...t, ...patch } : t)));
@@ -606,8 +725,27 @@ function App() {
               tabId={activeTab.meta.tab_id}
               totalCols={activeTab.stats.totalCols}
               visible={showSearch}
+              showFilter={showFilter}
+              onToggleFilter={() => {
+                setShowFilter((v) => !v);
+                setShowGoto(false);
+                setShowRecent(false);
+              }}
+              onCloseFilter={() => setShowFilter(false)}
+              showGoto={showGoto}
+              onToggleGoto={() => {
+                setShowGoto((v) => !v);
+                setShowFilter(false);
+                setShowRecent(false);
+              }}
+              onCloseGoto={() => setShowGoto(false)}
               onNavigate={(row, col) => handleNavigateFor(activeTab.meta.tab_id, row, col)}
-              onToggleSearch={toggleSearch}
+              onToggleSearch={() => {
+                setShowFilter(false);
+                setShowGoto(false);
+                setShowRecent(false);
+                toggleSearch();
+              }}
               viewActive={activeTab.filterActive || activeTab.sortActive}
               onFilterChange={(active, rowCount) => {
                 updateTab(activeTab.meta.tab_id, {
@@ -620,14 +758,26 @@ function App() {
           </div>
         )}
         <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-          <div style={{ position: "relative" }}>
-            <button className="icon-btn" title="Open file" aria-label="Open file (Cmd/Ctrl+O)" onClick={openFile} disabled={tabs.length >= MAX_TABS}>
+          <div style={{ position: "relative" }} className="recent-popover-anchor">
+            <button
+              className="icon-btn"
+              title={`Open file (${getToolbarShortcutLabel("open")})`}
+              aria-label={`Open file (${getToolbarShortcutLabel("open")})`}
+              onClick={openFile}
+              disabled={tabs.length >= MAX_TABS}
+            >
               <IconFolder />
             </button>
             <button
               className="icon-btn"
-              title="Recent files"
-              onClick={() => setShowRecent((v) => !v)}
+              data-active={showRecent}
+              title={`Recent files (${getToolbarShortcutLabel("recent")})`}
+              aria-label={`Recent files (${getToolbarShortcutLabel("recent")})`}
+              onClick={() => {
+                setShowRecent((v) => !v);
+                setShowFilter(false);
+                setShowGoto(false);
+              }}
               disabled={settings.recentFiles.length === 0}
             >
               <IconClock />
@@ -635,16 +785,27 @@ function App() {
             {showRecent && settings.recentFiles.length > 0 && (
               <div
                 style={{
-                  position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 10,
-                  display: "flex", flexDirection: "column", minWidth: 220,
-                  background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 4,
-                  boxShadow: "0 2px 8px rgba(0,0,0,0.2)", padding: 4,
+                  position: "absolute",
+                  top: "calc(100% + 4px)",
+                  left: 0,
+                  zIndex: 10,
+                  display: "flex",
+                  flexDirection: "column",
+                  minWidth: 220,
+                  background: "var(--bg)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 4,
+                  boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
+                  padding: 4,
                 }}
               >
                 {settings.recentFiles.map((p) => (
                   <button
                     key={p}
-                    onClick={() => { setShowRecent(false); openFileAsNewTab(p); }}
+                    onClick={() => {
+                      setShowRecent(false);
+                      openFileAsNewTab(p);
+                    }}
                     style={{ textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                     title={p}
                   >
@@ -657,7 +818,8 @@ function App() {
           {activeTab && (
             <button
               className="icon-btn"
-              title={activeTab.saving ? "Saving…" : "Save"}
+              title={activeTab.saving ? "Saving…" : `Save (${getToolbarShortcutLabel("save")})`}
+              aria-label={`Save (${getToolbarShortcutLabel("save")})`}
               onClick={() => saveFile(activeTab.meta.tab_id)}
               disabled={activeTab.saving}
             >
@@ -667,26 +829,38 @@ function App() {
           <button
             className="icon-btn"
             data-active={settings.showGridChrome}
-            title="Toggle grid lines"
-            onClick={() => updateSettings({ showGridChrome: !settings.showGridChrome })}
+            title={`Toggle grid lines (${getToolbarShortcutLabel("gridLines")})`}
+            aria-label={`Toggle grid lines (${getToolbarShortcutLabel("gridLines")})`}
+            onClick={toggleGridChrome}
           >
             <IconGrid />
           </button>
           <button
             className="icon-btn"
             data-active={settings.freezeHeader}
-            title="Toggle freeze header"
-            onClick={() => updateSettings({ freezeHeader: !settings.freezeHeader })}
+            title={`Toggle freeze header (${getToolbarShortcutLabel("freezeHeader")})`}
+            aria-label={`Toggle freeze header (${getToolbarShortcutLabel("freezeHeader")})`}
+            onClick={toggleFreezeHeader}
           >
             <IconPin />
           </button>
-          <button className="icon-btn" title={`Theme: ${settings.theme} (click to change)`} onClick={cycleTheme}>
+          <button
+            className="icon-btn"
+            title={`Theme: ${settings.theme} (${getToolbarShortcutLabel("theme")})`}
+            aria-label={`Theme: ${settings.theme} (${getToolbarShortcutLabel("theme")})`}
+            onClick={cycleTheme}
+          >
             <ThemeIcon />
           </button>
           <button
             className="icon-btn"
             style={{ position: "relative" }}
-            title={updateAvailable ? "Update available! Click to view" : "Check for updates"}
+            title={
+              updateAvailable
+                ? `Update available! Click or ${getToolbarShortcutLabel("update")} to view`
+                : `Check for updates (${getToolbarShortcutLabel("update")})`
+            }
+            aria-label={`Check for updates (${getToolbarShortcutLabel("update")})`}
             onClick={() => setShowUpdateDialog(true)}
           >
             <IconDownload />

@@ -7,6 +7,7 @@ export interface FilterRule {
   id: number;
   col: number | null; // null = All Columns, or 0-based column index
   query: string;
+  enabled: boolean;
 }
 
 interface ToolbarProps {
@@ -54,7 +55,7 @@ export function Toolbar({
 
   const nextRuleId = useRef(2);
   const [filterRules, setFilterRules] = useState<FilterRule[]>([
-    { id: 1, col: null, query: "" },
+    { id: 1, col: null, query: "", enabled: true },
   ]);
   const [appliedCount, setAppliedCount] = useState(0);
 
@@ -90,7 +91,7 @@ export function Toolbar({
   function applyFilters() {
     if (isFiltering) return;
     const activeCriteria = filterRules
-      .filter((r) => r.query.trim().length > 0)
+      .filter((r) => r.enabled && r.query.trim().length > 0)
       .map((r) => ({ col: r.col, query: r.query.trim() }));
 
     setIsFiltering(true);
@@ -112,7 +113,7 @@ export function Toolbar({
   function reapplyFilters() {
     if (isFiltering) return;
     const activeCriteria = filterRules
-      .filter((r) => r.query.trim().length > 0)
+      .filter((r) => r.enabled && r.query.trim().length > 0)
       .map((r) => ({ col: r.col, query: r.query.trim() }));
 
     setIsFiltering(true);
@@ -152,7 +153,7 @@ export function Toolbar({
     invoke<number>("set_filters", { tabId, filters: [], freezeHeader: freezeHeader ?? true })
       .then((rowCount) => {
         setIsFiltering(false);
-        setFilterRules([{ id: nextRuleId.current++, col: null, query: "" }]);
+        setFilterRules([{ id: nextRuleId.current++, col: null, query: "", enabled: true }]);
         setAppliedCount(0);
         onFilterChange(false, rowCount);
         onCloseFilter();
@@ -173,7 +174,7 @@ export function Toolbar({
   function addRule() {
     setFilterRules((prev) => [
       ...prev,
-      { id: nextRuleId.current++, col: null, query: "" },
+      { id: nextRuleId.current++, col: null, query: "", enabled: true },
     ]);
   }
 
@@ -182,7 +183,7 @@ export function Toolbar({
       const remaining = prev.filter((r) => r.id !== id);
       return remaining.length > 0
         ? remaining
-        : [{ id: nextRuleId.current++, col: null, query: "" }];
+        : [{ id: nextRuleId.current++, col: null, query: "", enabled: true }];
     });
   }
 
@@ -224,8 +225,8 @@ export function Toolbar({
               zIndex: 50,
               display: "flex",
               flexDirection: "column",
-              width: 300,
-              maxWidth: "min(320px, calc(100vw - 24px))",
+              width: 325,
+              maxWidth: "min(345px, calc(100vw - 24px))",
               background: "var(--bg)",
               border: "1px solid var(--border)",
               borderRadius: 6,
@@ -267,7 +268,37 @@ export function Toolbar({
               }}
             >
               {filterRules.map((rule, idx) => (
-                <div key={rule.id} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <div
+                  key={rule.id}
+                  style={{
+                    display: "flex",
+                    gap: 6,
+                    alignItems: "center",
+                    opacity: rule.enabled ? 1 : 0.55,
+                    transition: "opacity 0.15s ease",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={rule.enabled}
+                    onChange={(e) => updateRule(rule.id, { enabled: e.target.checked })}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        applyFilters();
+                      }
+                    }}
+                    title={rule.enabled ? "Disable this condition" : "Enable this condition"}
+                    aria-label={rule.enabled ? `Disable condition ${idx + 1}` : `Enable condition ${idx + 1}`}
+                    style={{
+                      cursor: "pointer",
+                      width: 15,
+                      height: 15,
+                      accentColor: "var(--primary, #396cd8)",
+                      flexShrink: 0,
+                      margin: 0,
+                    }}
+                  />
                   <select
                     value={rule.col === null ? "all" : String(rule.col)}
                     onChange={(e) =>
@@ -275,8 +306,15 @@ export function Toolbar({
                         col: e.target.value === "all" ? null : parseInt(e.target.value, 10),
                       })
                     }
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        applyFilters();
+                      }
+                    }}
+                    title={!rule.enabled ? "Condition disabled (check box to enable)" : undefined}
                     style={{
-                      width: 100,
+                      width: 95,
                       flexShrink: 0,
                       fontSize: 12,
                       padding: "3px 4px",
@@ -309,6 +347,7 @@ export function Toolbar({
                         applyFilters();
                       }
                     }}
+                    title={!rule.enabled ? "Condition disabled (check box to enable)" : undefined}
                     style={{
                       flex: 1,
                       minWidth: 0,
@@ -327,6 +366,7 @@ export function Toolbar({
                       className="icon-btn"
                       style={{ width: 22, height: 22, fontSize: 14, flexShrink: 0 }}
                       title="Remove condition"
+                      aria-label={`Remove condition ${idx + 1}`}
                       onClick={() => removeRule(rule.id)}
                     >
                       ×

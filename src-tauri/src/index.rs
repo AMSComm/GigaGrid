@@ -14,6 +14,7 @@ const CHUNK_SIZE: usize = 8 * 1024 * 1024;
 /// display-only metadata, except delimiter which `read_row`/`save` also use
 /// to actually split/join fields (round-tripping a TSV file as TSV, not
 /// silently rewriting it as CSV).
+#[derive(Clone)]
 pub struct CsvIndex {
     offsets: Vec<u64>,
     delimiter: u8,
@@ -152,6 +153,14 @@ impl CsvIndex {
 
     pub fn line_ending_label(&self) -> &'static str {
         if self.crlf { "CRLF" } else { "LF" }
+    }
+
+    pub fn row_span(&self, row: usize) -> Option<(u64, u64)> {
+        if row + 1 < self.offsets.len() {
+            Some((self.offsets[row], self.offsets[row + 1]))
+        } else {
+            None
+        }
     }
 
     /// Single forward scan. `in_quotes` toggles on every raw `"` byte —

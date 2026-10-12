@@ -25,6 +25,7 @@ interface ToolbarProps {
   filterActive?: boolean;
   hasFilterEdits?: boolean;
   onFilterChange: (active: boolean, rowCount: number) => void;
+  onError?: (message: string | null) => void;
 }
 
 export function Toolbar({
@@ -43,9 +44,11 @@ export function Toolbar({
   filterActive,
   hasFilterEdits,
   onFilterChange,
+  onError,
 }: ToolbarProps) {
   const [gotoRow, setGotoRow] = useState("");
   const [gotoCol, setGotoCol] = useState("");
+  const [isFiltering, setIsFiltering] = useState(false);
 
   const nextRuleId = useRef(2);
   const [filterRules, setFilterRules] = useState<FilterRule[]>([
@@ -83,26 +86,46 @@ export function Toolbar({
   }
 
   function applyFilters() {
+    if (isFiltering) return;
     const activeCriteria = filterRules
       .filter((r) => r.query.trim().length > 0)
       .map((r) => ({ col: r.col, query: r.query.trim() }));
 
-    invoke<number>("set_filters", { tabId, filters: activeCriteria }).then((rowCount) => {
-      setAppliedCount(activeCriteria.length);
-      onFilterChange(activeCriteria.length > 0, rowCount);
-      onCloseFilter();
-    });
+    setIsFiltering(true);
+    onError?.(null);
+    invoke<number>("set_filters", { tabId, filters: activeCriteria })
+      .then((rowCount) => {
+        setIsFiltering(false);
+        setAppliedCount(activeCriteria.length);
+        onFilterChange(activeCriteria.length > 0, rowCount);
+        onCloseFilter();
+      })
+      .catch((err) => {
+        setIsFiltering(false);
+        const msg = typeof err === "string" ? err : (err?.message || "Failed to apply filter");
+        onError?.(msg);
+      });
   }
 
   function reapplyFilters() {
+    if (isFiltering) return;
     const activeCriteria = filterRules
       .filter((r) => r.query.trim().length > 0)
       .map((r) => ({ col: r.col, query: r.query.trim() }));
 
-    invoke<number>("set_filters", { tabId, filters: activeCriteria }).then((rowCount) => {
-      setAppliedCount(activeCriteria.length);
-      onFilterChange(activeCriteria.length > 0, rowCount);
-    });
+    setIsFiltering(true);
+    onError?.(null);
+    invoke<number>("set_filters", { tabId, filters: activeCriteria })
+      .then((rowCount) => {
+        setIsFiltering(false);
+        setAppliedCount(activeCriteria.length);
+        onFilterChange(activeCriteria.length > 0, rowCount);
+      })
+      .catch((err) => {
+        setIsFiltering(false);
+        const msg = typeof err === "string" ? err : (err?.message || "Failed to re-apply filter");
+        onError?.(msg);
+      });
   }
 
   useEffect(() => {
@@ -121,12 +144,22 @@ export function Toolbar({
   }, [filterActive, hasFilterEdits, filterRules, tabId]);
 
   function clearAllFilters() {
-    invoke<number>("set_filters", { tabId, filters: [] }).then((rowCount) => {
-      setFilterRules([{ id: nextRuleId.current++, col: null, query: "" }]);
-      setAppliedCount(0);
-      onFilterChange(false, rowCount);
-      onCloseFilter();
-    });
+    if (isFiltering) return;
+    setIsFiltering(true);
+    onError?.(null);
+    invoke<number>("set_filters", { tabId, filters: [] })
+      .then((rowCount) => {
+        setIsFiltering(false);
+        setFilterRules([{ id: nextRuleId.current++, col: null, query: "" }]);
+        setAppliedCount(0);
+        onFilterChange(false, rowCount);
+        onCloseFilter();
+      })
+      .catch((err) => {
+        setIsFiltering(false);
+        const msg = typeof err === "string" ? err : (err?.message || "Failed to clear filters");
+        onError?.(msg);
+      });
   }
 
   function updateRule(id: number, patch: Partial<FilterRule>) {
@@ -267,6 +300,9 @@ export function Toolbar({
                     onChange={(e) => updateRule(rule.id, { query: e.target.value })}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
+                        if (e.nativeEvent.isComposing || (e as unknown as { isComposing?: boolean }).isComposing) {
+                          return;
+                        }
                         e.preventDefault();
                         applyFilters();
                       }
@@ -311,10 +347,12 @@ export function Toolbar({
               <button
                 type="button"
                 onClick={addRule}
+                disabled={isFiltering}
                 style={{
                   fontSize: 12,
                   padding: "3px 8px",
-                  cursor: "pointer",
+                  cursor: isFiltering ? "not-allowed" : "pointer",
+                  opacity: isFiltering ? 0.6 : 1,
                   background: "transparent",
                   border: "1px dashed var(--border)",
                   borderRadius: 4,
@@ -327,11 +365,13 @@ export function Toolbar({
                 {appliedCount > 0 && (
                   <button
                     type="button"
+                    disabled={isFiltering}
                     onClick={clearAllFilters}
                     style={{
                       fontSize: 12,
                       padding: "3px 8px",
-                      cursor: "pointer",
+                      cursor: isFiltering ? "not-allowed" : "pointer",
+                      opacity: isFiltering ? 0.6 : 1,
                       background: "transparent",
                       border: "1px solid var(--border)",
                       borderRadius: 4,
@@ -343,11 +383,13 @@ export function Toolbar({
                 )}
                 <button
                   type="button"
+                  disabled={isFiltering}
                   onClick={applyFilters}
                   style={{
                     fontSize: 12,
                     padding: "3px 12px",
-                    cursor: "pointer",
+                    cursor: isFiltering ? "not-allowed" : "pointer",
+                    opacity: isFiltering ? 0.7 : 1,
                     background: "var(--primary, #396cd8)",
                     color: "#fff",
                     border: "none",
@@ -355,7 +397,7 @@ export function Toolbar({
                     fontWeight: 500,
                   }}
                 >
-                  {appliedCount > 0 ? "Re-apply" : "Apply"}
+                  {isFiltering ? "Applying…" : appliedCount > 0 ? "Re-apply" : "Apply"}
                 </button>
               </div>
             </div>
@@ -367,14 +409,16 @@ export function Toolbar({
         type="button"
         className="icon-btn"
         data-action="reapply-filter"
-        disabled={!filterActive || !hasFilterEdits}
+        disabled={!filterActive || !hasFilterEdits || isFiltering}
         style={{
-          opacity: filterActive && hasFilterEdits ? 1 : 0.4,
-          cursor: filterActive && hasFilterEdits ? "pointer" : "not-allowed",
-          color: filterActive && hasFilterEdits ? "var(--primary, #396cd8)" : undefined,
+          opacity: filterActive && hasFilterEdits && !isFiltering ? 1 : 0.4,
+          cursor: filterActive && hasFilterEdits && !isFiltering ? "pointer" : "not-allowed",
+          color: filterActive && hasFilterEdits && !isFiltering ? "var(--primary, #396cd8)" : undefined,
         }}
         title={
-          filterActive && hasFilterEdits
+          isFiltering
+            ? "Applying filter…"
+            : filterActive && hasFilterEdits
             ? `Re-apply filter (${getToolbarShortcutLabel("reapplyFilter")})`
             : "Re-apply filter (no modified cells)"
         }

@@ -118,11 +118,7 @@ fn get_rows_impl(
     count: usize,
 ) -> Result<Vec<Vec<String>>, String> {
     let mut file = File::open(&open_file.path).map_err(|e| e.to_string())?;
-    let total = open_file
-        .view
-        .as_ref()
-        .map(|v| v.len())
-        .unwrap_or_else(|| open_file.overlay.row_count());
+    let total = view_len(open_file);
     let end = (start + count).min(total);
     let mut rows = Vec::with_capacity(end.saturating_sub(start));
     for i in start..end {
@@ -159,29 +155,90 @@ fn rebuild_view(open_file: &mut OpenFile) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn set_sort(col: usize, tab_id: TabId, state: State<AppState>) -> Result<usize, String> {
+pub async fn set_sort(col: usize, tab_id: TabId, state: State<'_, AppState>) -> Result<usize, String> {
+    let (path, index, overlay, filters) = {
+        let guard = state.lock().map_err(|e| e.to_string())?;
+        let open_file = guard.files.get(&tab_id).ok_or_else(|| "tab not found".to_string())?;
+        (
+            open_file.path.clone(),
+            open_file.index.clone(),
+            open_file.overlay.clone(),
+            open_file.filters.clone(),
+        )
+    };
+
+    let view = tauri::async_runtime::spawn_blocking(move || {
+        let mut file = File::open(&path).map_err(|e| e.to_string())?;
+        Ok::<_, String>(crate::search::sorted_filtered_view(
+            &overlay,
+            &index,
+            &mut file,
+            Some(col),
+            &filters,
+        ))
+    })
+    .await
+    .map_err(|e| format!("sort execution failed: {e}"))??;
+
     let mut guard = state.lock().map_err(|e| e.to_string())?;
-    let open_file = guard.files.get_mut(&tab_id).ok_or_else(|| "tab not found".to_string())?;
+    let open_file = guard.files.get_mut(&tab_id).ok_or_else(|| "tab closed while sorting".to_string())?;
     open_file.sort_col = Some(col);
-    rebuild_view(open_file)?;
-    Ok(view_len(open_file))
+    let count = view.len();
+    open_file.view = Some(view);
+    Ok(count)
 }
 
 #[tauri::command]
-pub fn set_filters(
+pub async fn set_filters(
     filters: Vec<crate::search::FilterCriterion>,
     tab_id: TabId,
-    state: State<AppState>,
+    state: State<'_, AppState>,
 ) -> Result<usize, String> {
+    let (path, index, overlay, sort_col) = {
+        let guard = state.lock().map_err(|e| e.to_string())?;
+        let open_file = guard.files.get(&tab_id).ok_or_else(|| "tab not found".to_string())?;
+        if filters.is_empty() && open_file.sort_col.is_none() {
+            drop(guard);
+            let mut guard = state.lock().map_err(|e| e.to_string())?;
+            if let Some(f) = guard.files.get_mut(&tab_id) {
+                f.filters = filters;
+                f.view = None;
+                return Ok(f.overlay.row_count());
+            }
+            return Err("tab closed".to_string());
+        }
+        (
+            open_file.path.clone(),
+            open_file.index.clone(),
+            open_file.overlay.clone(),
+            open_file.sort_col,
+        )
+    };
+
+    let filters_clone = filters.clone();
+    let view = tauri::async_runtime::spawn_blocking(move || {
+        let mut file = File::open(&path).map_err(|e| e.to_string())?;
+        Ok::<_, String>(crate::search::sorted_filtered_view(
+            &overlay,
+            &index,
+            &mut file,
+            sort_col,
+            &filters_clone,
+        ))
+    })
+    .await
+    .map_err(|e| format!("filter execution failed: {e}"))??;
+
     let mut guard = state.lock().map_err(|e| e.to_string())?;
-    let open_file = guard.files.get_mut(&tab_id).ok_or_else(|| "tab not found".to_string())?;
+    let open_file = guard.files.get_mut(&tab_id).ok_or_else(|| "tab closed while filtering".to_string())?;
     open_file.filters = filters;
-    rebuild_view(open_file)?;
-    Ok(view_len(open_file))
+    let count = view.len();
+    open_file.view = Some(view);
+    Ok(count)
 }
 
 #[tauri::command]
-pub fn set_filter(query: String, tab_id: TabId, state: State<AppState>) -> Result<usize, String> {
+pub async fn set_filter(query: String, tab_id: TabId, state: State<'_, AppState>) -> Result<usize, String> {
     let filters = if query.is_empty() {
         Vec::new()
     } else {
@@ -190,16 +247,51 @@ pub fn set_filter(query: String, tab_id: TabId, state: State<AppState>) -> Resul
             query,
         }]
     };
-    set_filters(filters, tab_id, state)
+    set_filters(filters, tab_id, state).await
 }
 
 #[tauri::command]
-pub fn clear_sort(tab_id: TabId, state: State<AppState>) -> Result<usize, String> {
+pub async fn clear_sort(tab_id: TabId, state: State<'_, AppState>) -> Result<usize, String> {
+    let (path, index, overlay, filters) = {
+        let guard = state.lock().map_err(|e| e.to_string())?;
+        let open_file = guard.files.get(&tab_id).ok_or_else(|| "tab not found".to_string())?;
+        if open_file.filters.is_empty() {
+            drop(guard);
+            let mut guard = state.lock().map_err(|e| e.to_string())?;
+            if let Some(f) = guard.files.get_mut(&tab_id) {
+                f.sort_col = None;
+                f.view = None;
+                return Ok(f.overlay.row_count());
+            }
+            return Err("tab closed".to_string());
+        }
+        (
+            open_file.path.clone(),
+            open_file.index.clone(),
+            open_file.overlay.clone(),
+            open_file.filters.clone(),
+        )
+    };
+
+    let view = tauri::async_runtime::spawn_blocking(move || {
+        let mut file = File::open(&path).map_err(|e| e.to_string())?;
+        Ok::<_, String>(crate::search::sorted_filtered_view(
+            &overlay,
+            &index,
+            &mut file,
+            None,
+            &filters,
+        ))
+    })
+    .await
+    .map_err(|e| format!("clear sort execution failed: {e}"))??;
+
     let mut guard = state.lock().map_err(|e| e.to_string())?;
-    let open_file = guard.files.get_mut(&tab_id).ok_or_else(|| "tab not found".to_string())?;
+    let open_file = guard.files.get_mut(&tab_id).ok_or_else(|| "tab closed".to_string())?;
     open_file.sort_col = None;
-    rebuild_view(open_file)?;
-    Ok(view_len(open_file))
+    let count = view.len();
+    open_file.view = Some(view);
+    Ok(count)
 }
 
 #[tauri::command]

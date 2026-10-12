@@ -1,6 +1,7 @@
 use crate::index::CsvIndex;
 use crate::overlay::Overlay;
 use std::fs::File;
+use std::io::{Read, Seek};
 
 /// Scan forward cell-by-cell starting AFTER `(from_row, from_col)` in
 /// row-major order, wrapping around the whole file — returns the exact
@@ -174,18 +175,72 @@ pub fn sorted_filtered_view(
     filters: &[FilterCriterion],
 ) -> Vec<usize> {
     let row_count = overlay.row_count();
-    let mut rows: Vec<usize> = (0..row_count).collect();
-
     let active_filters: Vec<(&FilterCriterion, String)> = filters
         .iter()
         .filter(|f| !f.query.trim().is_empty())
         .map(|f| (f, f.query.to_lowercase()))
         .collect();
 
-    if !active_filters.is_empty() {
-        rows.retain(|&r| {
+    let mut rows: Vec<usize> = Vec::with_capacity(row_count);
+
+    if active_filters.is_empty() {
+        rows.extend(0..row_count);
+    } else {
+        let edited_keys = overlay.edited_row_keys();
+        let delimiter = index.delimiter();
+        let encoding = index.encoding();
+
+        let mut reader_opt = file.try_clone().ok().map(|f| std::io::BufReader::with_capacity(2 * 1024 * 1024, f));
+        let mut curr_pos: u64 = index.row_span(0).map(|s| s.0).unwrap_or(0);
+        if let Some(ref mut reader) = reader_opt {
+            let _ = reader.seek(std::io::SeekFrom::Start(curr_pos));
+        }
+        let mut buf = Vec::new();
+
+        for r in 0..row_count {
+            let row_key = overlay.get_row_source(r);
+            let is_clean = match row_key {
+                Some(crate::overlay::RowKey::Original(orig_r)) => {
+                    !edited_keys.contains(&crate::overlay::RowKey::Original(orig_r))
+                }
+                _ => false,
+            };
+
+            if is_clean {
+                if let (Some(crate::overlay::RowKey::Original(orig_r)), Some(ref mut reader)) =
+                    (row_key, &mut reader_opt)
+                {
+                    if let Some((start, end)) = index.row_span(orig_r) {
+                        let len = (end - start) as usize;
+                        if start != curr_pos {
+                            let _ = reader.seek(std::io::SeekFrom::Start(start));
+                        }
+                        buf.resize(len, 0);
+                        if reader.read_exact(&mut buf).is_ok() {
+                            curr_pos = end;
+                            let matches = active_filters.iter().all(|(criterion, needle_lower)| {
+                                let orig_col = match criterion.col {
+                                    Some(lc) => match overlay.logical_to_orig_col(lc) {
+                                        Some(c) => Some(c),
+                                        None => return false,
+                                    },
+                                    None => None,
+                                };
+                                raw_line_matches(&buf, delimiter, encoding, orig_col, needle_lower)
+                            });
+                            if matches {
+                                rows.push(r);
+                            }
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            // Fallback for edited rows, newly inserted rows, or unbuffered read fallback
+            curr_pos = 0;
             if let Ok(row) = overlay.read_logical_row(index, file, r) {
-                active_filters.iter().all(|(criterion, needle_lower)| {
+                let matches = active_filters.iter().all(|(criterion, needle_lower)| {
                     match criterion.col {
                         Some(col_idx) => row
                             .get(col_idx)
@@ -195,11 +250,12 @@ pub fn sorted_filtered_view(
                             .iter()
                             .any(|cell| cell.to_lowercase().contains(needle_lower)),
                     }
-                })
-            } else {
-                false
+                });
+                if matches {
+                    rows.push(r);
+                }
             }
-        });
+        }
     }
 
     if let Some(col) = sort_col {
@@ -219,6 +275,93 @@ pub fn sorted_filtered_view(
     }
 
     rows
+}
+
+fn raw_line_matches(
+    raw_bytes: &[u8],
+    delimiter: u8,
+    encoding: &'static encoding_rs::Encoding,
+    orig_col: Option<usize>,
+    needle_lower: &str,
+) -> bool {
+    let mut line = raw_bytes;
+    while matches!(line.last(), Some(b'\n') | Some(b'\r')) {
+        line = &line[..line.len() - 1];
+    }
+
+    if let Some(target_col) = orig_col {
+        let mut curr_col = 0;
+        let mut in_quotes = false;
+        let mut field_start = 0;
+        let mut i = 0;
+        while i < line.len() {
+            let b = line[i];
+            if in_quotes {
+                if b == b'"' {
+                    if i + 1 < line.len() && line[i + 1] == b'"' {
+                        i += 2;
+                        continue;
+                    }
+                    in_quotes = false;
+                }
+            } else if b == b'"' {
+                in_quotes = true;
+            } else if b == delimiter {
+                if curr_col == target_col {
+                    return field_matches(&line[field_start..i], encoding, needle_lower);
+                }
+                curr_col += 1;
+                field_start = i + 1;
+            }
+            i += 1;
+        }
+        if curr_col == target_col {
+            return field_matches(&line[field_start..], encoding, needle_lower);
+        }
+        false
+    } else {
+        let mut in_quotes = false;
+        let mut field_start = 0;
+        let mut i = 0;
+        while i < line.len() {
+            let b = line[i];
+            if in_quotes {
+                if b == b'"' {
+                    if i + 1 < line.len() && line[i + 1] == b'"' {
+                        i += 2;
+                        continue;
+                    }
+                    in_quotes = false;
+                }
+            } else if b == b'"' {
+                in_quotes = true;
+            } else if b == delimiter {
+                if field_matches(&line[field_start..i], encoding, needle_lower) {
+                    return true;
+                }
+                field_start = i + 1;
+            }
+            i += 1;
+        }
+        field_matches(&line[field_start..], encoding, needle_lower)
+    }
+}
+
+fn field_matches(
+    field_bytes: &[u8],
+    encoding: &'static encoding_rs::Encoding,
+    needle_lower: &str,
+) -> bool {
+    let mut field = field_bytes;
+    if field.starts_with(b"\"") && field.ends_with(b"\"") && field.len() >= 2 {
+        field = &field[1..field.len() - 1];
+    }
+    let (decoded, _, _) = encoding.decode(field);
+    if decoded.contains('"') {
+        decoded.replace("\"\"", "\"").to_lowercase().contains(needle_lower)
+    } else {
+        decoded.to_lowercase().contains(needle_lower)
+    }
 }
 
 #[cfg(test)]
@@ -464,5 +607,22 @@ mod tests {
         // sorted by overlay-merged col 0: "a" (row 0), "y" (row 1) -> [0, 1]
         assert_eq!(view, vec![0, 1]);
         std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_fuseichousa_filtered_view() {
+        let path = std::path::PathBuf::from("/Users/huy/Downloads/fuseichousa_journal_monthly.csv");
+        if !path.exists() {
+            return;
+        }
+        let index = crate::index::CsvIndex::build_with_options(&path, None, None).unwrap();
+        let mut file = std::fs::File::open(&path).unwrap();
+        let overlay = overlay_for(index.row_count(), 7);
+        let filters = vec![FilterCriterion {
+            col: Some(6),
+            query: "取引中止".to_string(),
+        }];
+        let view = sorted_filtered_view(&overlay, &index, &mut file, None, &filters);
+        assert_eq!(view.len(), 54128);
     }
 }

@@ -754,6 +754,7 @@ function App() {
                   viewActive={activeTab.filterActive || activeTab.sortActive}
                   filterActive={activeTab.filterActive}
                   hasFilterEdits={activeTab.filterEdits.size > 0}
+                  onError={(message) => updateTab(activeTab.meta.tab_id, { error: message })}
                   onFilterChange={(active, rowCount) => {
                     updateTab(activeTab.meta.tab_id, {
                       filterActive: active,

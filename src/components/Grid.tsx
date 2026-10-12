@@ -442,8 +442,8 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
 
     if (fetchTimer.current !== null) window.clearTimeout(fetchTimer.current);
     fetchTimer.current = window.setTimeout(() => {
-      invoke<string[][]>("get_rows", { tabId, start: fetchStart, count: range.count }).then(
-        (rows) => {
+      invoke<string[][]>("get_rows", { tabId, start: fetchStart, count: range.count })
+        .then((rows) => {
           setRowsByIndex((prev) => {
             const next = prev.size > MAX_CACHE_ROWS ? new Map<number, string[]>() : new Map(prev);
             const rowZero = prev.get(0);
@@ -451,8 +451,12 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
             rows.forEach((row, i) => next.set(fetchStart + i, row));
             return next;
           });
-        },
-      );
+          onError?.(null);
+        })
+        .catch((err) => {
+          const msg = typeof err === "string" ? err : (err?.message || "Failed to load rows");
+          onError?.(msg);
+        });
     }, FETCH_DEBOUNCE_MS);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range.start, range.count, freezeHeader, cacheGeneration]);
@@ -460,10 +464,16 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
   useEffect(() => {
     if (rowCount === 0) return;
     if (rowsByIndex.has(0)) return;
-    invoke<string[][]>("get_rows", { tabId, start: 0, count: 1 }).then((rows) => {
-      if (!rows[0]) return;
-      setRowsByIndex((prev) => new Map(prev).set(0, rows[0]));
-    });
+    invoke<string[][]>("get_rows", { tabId, start: 0, count: 1 })
+      .then((rows) => {
+        if (!rows[0]) return;
+        setRowsByIndex((prev) => new Map(prev).set(0, rows[0]));
+        onError?.(null);
+      })
+      .catch((err) => {
+        const msg = typeof err === "string" ? err : (err?.message || "Failed to load header row");
+        onError?.(msg);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rowCount, cacheGeneration]);
 

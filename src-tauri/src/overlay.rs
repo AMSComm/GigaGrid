@@ -30,6 +30,7 @@ type CellEdit = (CellKey, Option<String>);
 /// One undo-able action. Cell edits and structural edits (insert/delete
 /// row/col) share ONE stack so Cmd+Z always reverts whatever happened
 /// last, regardless of kind.
+#[derive(Clone)]
 enum Action {
     /// One or more cell writes (a single `set` is a 1-entry group; a paste
     /// via `set_many` is one group covering the whole batch) — same
@@ -53,6 +54,7 @@ enum Action {
 /// directly — since the logical row/column count and the mapping to
 /// original data can differ from the file's own shape the moment a
 /// row/column has been inserted or deleted.
+#[derive(Clone)]
 pub struct Overlay {
     row_order: Vec<RowKey>,
     col_order: Vec<ColKey>,
@@ -87,6 +89,21 @@ impl Overlay {
 
     pub fn col_count(&self) -> usize {
         self.col_order.len()
+    }
+
+    pub fn get_row_source(&self, logical_row: usize) -> Option<RowKey> {
+        self.row_order.get(logical_row).copied()
+    }
+
+    pub fn edited_row_keys(&self) -> std::collections::HashSet<RowKey> {
+        self.cell_edits.keys().map(|k| k.0).collect()
+    }
+
+    pub fn logical_to_orig_col(&self, logical_col: usize) -> Option<usize> {
+        match self.col_order.get(logical_col)? {
+            ColKey::Original(c) => Some(*c),
+            ColKey::New(_) => None,
+        }
     }
 
     fn cell_key(&self, row: usize, col: usize) -> Option<CellKey> {

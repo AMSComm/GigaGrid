@@ -2,6 +2,16 @@
 
 All notable changes to **Gigagrid** will be documented in this file.
 
+## [v0.5.1] - 2026-10-12
+
+### 🚀 Features & Enhancements
+- **Cell Editing Under Active Filter**: Enabled inline cell editing and paste operations while multi-criteria filters are active, following the Excel/Google Sheets frozen filter view model. Filtered rows remain locked in place during and immediately after cell commits without unexpected row shifts or premature exclusions.
+- **Backend View Remapping**: Added coordinate remapping in backend commands (`set_cell`, `set_cells_batch`) to correctly translate display row indices to logical row coordinates via `open_file.view`, preventing data corruption across filtered views.
+- **Visual Modified Indicator**: Highlighted edited cells with an amber indicator dot (`#f59e0b`) in the top-right corner to indicate modified content within the current filter session.
+- **Re-apply Filter Action & Shortcut**: Added a dedicated "Re-apply filter" toolbar button and shortcut (`Cmd/Ctrl + Shift + R`) to allow users to manually re-evaluate active filter criteria when ready, updating the row set and clearing modified markers.
+
+---
+
 ## [v0.5.0] - 2026-09-26
 
 ### 🚀 Features & Enhancements

@@ -105,6 +105,7 @@ impl CsvIndex {
         self.offsets.len().saturating_sub(1)
     }
 
+    #[allow(dead_code)]
     pub fn delimiter(&self) -> u8 {
         self.delimiter
     }
@@ -157,10 +158,12 @@ impl CsvIndex {
     /// an escaped `""` inside a quoted field toggles twice and cancels out,
     /// so this correctly tracks quote state across chunk boundaries without
     /// needing to peek at the next byte.
+    #[allow(dead_code)]
     pub fn build(path: &Path) -> io::Result<CsvIndex> {
         Self::build_inner(path, None, None)
     }
 
+    #[allow(dead_code)]
     pub fn build_with_delimiter(path: &Path, delimiter: u8) -> io::Result<CsvIndex> {
         Self::build_inner(path, Some(delimiter), None)
     }

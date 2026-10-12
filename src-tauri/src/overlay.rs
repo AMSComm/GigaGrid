@@ -98,6 +98,7 @@ impl Overlay {
     /// `None`, same as a cache miss). Callers merge this with the raw value
     /// themselves via `read_logical_row` below (or, for a single cell,
     /// by calling this after resolving the raw value some other way).
+    #[allow(dead_code)]
     pub fn get(&self, row: usize, col: usize) -> Option<&String> {
         let key = self.cell_key(row, col)?;
         self.cell_edits.get(&key)

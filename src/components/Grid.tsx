@@ -728,7 +728,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
 
   async function sortByCol(col: number) {
     setContextMenu(null);
-    const newCount = await invoke<number>("set_sort", { col, tabId });
+    const newCount = await invoke<number>("set_sort", { col, tabId, freezeHeader });
     invalidateCache();
     onSortChange(true, newCount);
   }

@@ -200,11 +200,30 @@ function App() {
   }
 
   function toggleFreezeHeader() {
+    const nextFreeze = !settings.freezeHeader;
     setSettings((prev) => {
-      const next = { ...prev, freezeHeader: !prev.freezeHeader };
+      const next = { ...prev, freezeHeader: nextFreeze };
       saveSettings(next);
       return next;
     });
+
+    for (const tab of tabs) {
+      if (tab.filterActive || tab.sortActive) {
+        invoke<number>("set_freeze_header", { tabId: tab.meta.tab_id, freeze: nextFreeze })
+          .then((newRowCount) => {
+            updateTab(tab.meta.tab_id, {
+              meta: { ...tab.meta, row_count: newRowCount },
+            });
+            gridRefs.current.get(tab.meta.tab_id)?.invalidateCache();
+          })
+          .catch((err) => {
+            const msg = typeof err === "string" ? err : (err?.message || "Failed to update freeze header");
+            updateTab(tab.meta.tab_id, { error: msg });
+          });
+      } else {
+        gridRefs.current.get(tab.meta.tab_id)?.invalidateCache();
+      }
+    }
   }
 
   function cycleTheme() {
@@ -754,6 +773,7 @@ function App() {
                   viewActive={activeTab.filterActive || activeTab.sortActive}
                   filterActive={activeTab.filterActive}
                   hasFilterEdits={activeTab.filterEdits.size > 0}
+                  freezeHeader={settings.freezeHeader}
                   onError={(message) => updateTab(activeTab.meta.tab_id, { error: message })}
                   onFilterChange={(active, rowCount) => {
                     updateTab(activeTab.meta.tab_id, {

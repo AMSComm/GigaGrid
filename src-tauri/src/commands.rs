@@ -35,6 +35,7 @@ pub struct OpenFile {
     pub view: Option<Vec<usize>>,
     pub sort_col: Option<usize>,
     pub filters: Vec<crate::search::FilterCriterion>,
+    pub freeze_header: bool,
 }
 
 #[derive(serde::Serialize)]
@@ -91,6 +92,7 @@ pub fn open_file(
         view: None,
         sort_col: None,
         filters: Vec::new(),
+        freeze_header: true,
     });
     Ok(FileMeta { tab_id, path, row_count, format, encoding, line_ending })
 }
@@ -149,21 +151,31 @@ fn rebuild_view(open_file: &mut OpenFile) -> Result<(), String> {
         &mut file,
         open_file.sort_col,
         &open_file.filters,
+        open_file.freeze_header,
     );
     open_file.view = Some(view);
     Ok(())
 }
 
 #[tauri::command]
-pub async fn set_sort(col: usize, tab_id: TabId, state: State<'_, AppState>) -> Result<usize, String> {
-    let (path, index, overlay, filters) = {
-        let guard = state.lock().map_err(|e| e.to_string())?;
-        let open_file = guard.files.get(&tab_id).ok_or_else(|| "tab not found".to_string())?;
+pub async fn set_sort(
+    col: usize,
+    tab_id: TabId,
+    freeze_header: Option<bool>,
+    state: State<'_, AppState>,
+) -> Result<usize, String> {
+    let (path, index, overlay, filters, freeze) = {
+        let mut guard = state.lock().map_err(|e| e.to_string())?;
+        let open_file = guard.files.get_mut(&tab_id).ok_or_else(|| "tab not found".to_string())?;
+        if let Some(fh) = freeze_header {
+            open_file.freeze_header = fh;
+        }
         (
             open_file.path.clone(),
             open_file.index.clone(),
             open_file.overlay.clone(),
             open_file.filters.clone(),
+            open_file.freeze_header,
         )
     };
 
@@ -175,6 +187,7 @@ pub async fn set_sort(col: usize, tab_id: TabId, state: State<'_, AppState>) -> 
             &mut file,
             Some(col),
             &filters,
+            freeze,
         ))
     })
     .await
@@ -192,26 +205,26 @@ pub async fn set_sort(col: usize, tab_id: TabId, state: State<'_, AppState>) -> 
 pub async fn set_filters(
     filters: Vec<crate::search::FilterCriterion>,
     tab_id: TabId,
+    freeze_header: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<usize, String> {
-    let (path, index, overlay, sort_col) = {
-        let guard = state.lock().map_err(|e| e.to_string())?;
-        let open_file = guard.files.get(&tab_id).ok_or_else(|| "tab not found".to_string())?;
+    let (path, index, overlay, sort_col, freeze) = {
+        let mut guard = state.lock().map_err(|e| e.to_string())?;
+        let open_file = guard.files.get_mut(&tab_id).ok_or_else(|| "tab not found".to_string())?;
+        if let Some(fh) = freeze_header {
+            open_file.freeze_header = fh;
+        }
         if filters.is_empty() && open_file.sort_col.is_none() {
-            drop(guard);
-            let mut guard = state.lock().map_err(|e| e.to_string())?;
-            if let Some(f) = guard.files.get_mut(&tab_id) {
-                f.filters = filters;
-                f.view = None;
-                return Ok(f.overlay.row_count());
-            }
-            return Err("tab closed".to_string());
+            open_file.filters = filters;
+            open_file.view = None;
+            return Ok(open_file.overlay.row_count());
         }
         (
             open_file.path.clone(),
             open_file.index.clone(),
             open_file.overlay.clone(),
             open_file.sort_col,
+            open_file.freeze_header,
         )
     };
 
@@ -224,6 +237,7 @@ pub async fn set_filters(
             &mut file,
             sort_col,
             &filters_clone,
+            freeze,
         ))
     })
     .await
@@ -238,7 +252,12 @@ pub async fn set_filters(
 }
 
 #[tauri::command]
-pub async fn set_filter(query: String, tab_id: TabId, state: State<'_, AppState>) -> Result<usize, String> {
+pub async fn set_filter(
+    query: String,
+    tab_id: TabId,
+    freeze_header: Option<bool>,
+    state: State<'_, AppState>,
+) -> Result<usize, String> {
     let filters = if query.is_empty() {
         Vec::new()
     } else {
@@ -247,12 +266,12 @@ pub async fn set_filter(query: String, tab_id: TabId, state: State<'_, AppState>
             query,
         }]
     };
-    set_filters(filters, tab_id, state).await
+    set_filters(filters, tab_id, freeze_header, state).await
 }
 
 #[tauri::command]
 pub async fn clear_sort(tab_id: TabId, state: State<'_, AppState>) -> Result<usize, String> {
-    let (path, index, overlay, filters) = {
+    let (path, index, overlay, filters, freeze) = {
         let guard = state.lock().map_err(|e| e.to_string())?;
         let open_file = guard.files.get(&tab_id).ok_or_else(|| "tab not found".to_string())?;
         if open_file.filters.is_empty() {
@@ -270,6 +289,7 @@ pub async fn clear_sort(tab_id: TabId, state: State<'_, AppState>) -> Result<usi
             open_file.index.clone(),
             open_file.overlay.clone(),
             open_file.filters.clone(),
+            open_file.freeze_header,
         )
     };
 
@@ -281,6 +301,7 @@ pub async fn clear_sort(tab_id: TabId, state: State<'_, AppState>) -> Result<usi
             &mut file,
             None,
             &filters,
+            freeze,
         ))
     })
     .await
@@ -289,6 +310,49 @@ pub async fn clear_sort(tab_id: TabId, state: State<'_, AppState>) -> Result<usi
     let mut guard = state.lock().map_err(|e| e.to_string())?;
     let open_file = guard.files.get_mut(&tab_id).ok_or_else(|| "tab closed".to_string())?;
     open_file.sort_col = None;
+    let count = view.len();
+    open_file.view = Some(view);
+    Ok(count)
+}
+
+#[tauri::command]
+pub async fn set_freeze_header(
+    freeze: bool,
+    tab_id: TabId,
+    state: State<'_, AppState>,
+) -> Result<usize, String> {
+    let (path, index, overlay, sort_col, filters) = {
+        let mut guard = state.lock().map_err(|e| e.to_string())?;
+        let open_file = guard.files.get_mut(&tab_id).ok_or_else(|| "tab not found".to_string())?;
+        open_file.freeze_header = freeze;
+        if open_file.sort_col.is_none() && open_file.filters.is_empty() {
+            return Ok(open_file.overlay.row_count());
+        }
+        (
+            open_file.path.clone(),
+            open_file.index.clone(),
+            open_file.overlay.clone(),
+            open_file.sort_col,
+            open_file.filters.clone(),
+        )
+    };
+
+    let view = tauri::async_runtime::spawn_blocking(move || {
+        let mut file = File::open(&path).map_err(|e| e.to_string())?;
+        Ok::<_, String>(crate::search::sorted_filtered_view(
+            &overlay,
+            &index,
+            &mut file,
+            sort_col,
+            &filters,
+            freeze,
+        ))
+    })
+    .await
+    .map_err(|e| format!("set freeze header failed: {e}"))??;
+
+    let mut guard = state.lock().map_err(|e| e.to_string())?;
+    let open_file = guard.files.get_mut(&tab_id).ok_or_else(|| "tab closed".to_string())?;
     let count = view.len();
     open_file.view = Some(view);
     Ok(count)
@@ -745,6 +809,7 @@ mod tests {
             view: None,
             sort_col: None,
             filters: Vec::new(),
+            freeze_header: true,
         };
 
         let rows = get_rows_impl(&open_file, 1, 2).unwrap();
@@ -764,6 +829,7 @@ mod tests {
             view: None,
             sort_col: None,
             filters: Vec::new(),
+            freeze_header: true,
         };
 
         let rows = get_rows_impl(&open_file, 0, 100).unwrap();
@@ -785,6 +851,7 @@ mod tests {
             view: None,
             sort_col: None,
             filters: Vec::new(),
+            freeze_header: true,
         };
 
         let rows = get_rows_impl(&open_file, 0, 2).unwrap();
@@ -806,6 +873,7 @@ mod tests {
             view: Some(vec![1, 0, 2]), // pretend a sort already reordered to a,b,c
             sort_col: None,
             filters: Vec::new(),
+            freeze_header: true,
         };
 
         let rows = get_rows_impl(&open_file, 0, 3).unwrap();
@@ -845,6 +913,7 @@ mod tests {
             view: None,
             sort_col: None,
             filters: Vec::new(),
+            freeze_header: true,
         };
 
         let t0 = std::time::Instant::now();
@@ -876,6 +945,7 @@ mod tests {
             view: None,
             sort_col: None,
             filters: Vec::new(),
+            freeze_header: true,
         });
         let state = Mutex::new(registry);
 
@@ -898,6 +968,7 @@ mod tests {
             view: None,
             sort_col: None,
             filters: Vec::new(),
+            freeze_header: true,
         };
 
         // Select all rows (0..2), cols 1..2 (the numeric columns)
@@ -929,6 +1000,7 @@ mod tests {
             view: Some(vec![2, 0]),
             sort_col: None,
             filters: Vec::new(),
+            freeze_header: true,
         };
 
         // Edit display row 0 (which is logical row 2 in the original file)
@@ -957,6 +1029,7 @@ mod tests {
             view: Some(vec![2, 1]), // display 0 -> row 2, display 1 -> row 1
             sort_col: None,
             filters: Vec::new(),
+            freeze_header: true,
         };
 
         // Batch edit display rows 0 and 1

@@ -173,6 +173,7 @@ pub fn sorted_filtered_view(
     file: &mut File,
     sort_col: Option<usize>,
     filters: &[FilterCriterion],
+    freeze_header: bool,
 ) -> Vec<usize> {
     let row_count = overlay.row_count();
     let active_filters: Vec<(&FilterCriterion, String)> = filters
@@ -181,23 +182,33 @@ pub fn sorted_filtered_view(
         .map(|f| (f, f.query.to_lowercase()))
         .collect();
 
-    let mut rows: Vec<usize> = Vec::with_capacity(row_count);
+    let (start_row, mut rows) = if freeze_header && row_count > 0 {
+        let mut r = Vec::with_capacity(row_count);
+        r.push(0);
+        (1, r)
+    } else {
+        (0, Vec::with_capacity(row_count))
+    };
 
     if active_filters.is_empty() {
-        rows.extend(0..row_count);
+        rows.extend(start_row..row_count);
     } else {
         let edited_keys = overlay.edited_row_keys();
         let delimiter = index.delimiter();
         let encoding = index.encoding();
 
         let mut reader_opt = file.try_clone().ok().map(|f| std::io::BufReader::with_capacity(2 * 1024 * 1024, f));
-        let mut curr_pos: u64 = index.row_span(0).map(|s| s.0).unwrap_or(0);
+        let mut curr_pos: u64 = if start_row < row_count {
+            index.row_span(start_row).map(|s| s.0).unwrap_or(0)
+        } else {
+            0
+        };
         if let Some(ref mut reader) = reader_opt {
             let _ = reader.seek(std::io::SeekFrom::Start(curr_pos));
         }
         let mut buf = Vec::new();
 
-        for r in 0..row_count {
+        for r in start_row..row_count {
             let row_key = overlay.get_row_source(r);
             let is_clean = match row_key {
                 Some(crate::overlay::RowKey::Original(orig_r)) => {
@@ -259,8 +270,14 @@ pub fn sorted_filtered_view(
     }
 
     if let Some(col) = sort_col {
-        let mut keyed: Vec<(usize, String)> = rows
-            .into_iter()
+        let (header_slice, data_slice) = if freeze_header && !rows.is_empty() {
+            (&rows[..1], &rows[1..])
+        } else {
+            (&[][..], &rows[..])
+        };
+        let mut keyed: Vec<(usize, String)> = data_slice
+            .iter()
+            .copied()
             .map(|r| {
                 let value = overlay
                     .read_logical_row(index, file, r)
@@ -271,7 +288,10 @@ pub fn sorted_filtered_view(
             })
             .collect();
         keyed.sort_by(|a, b| a.1.cmp(&b.1));
-        rows = keyed.into_iter().map(|(r, _)| r).collect();
+        let mut sorted_rows = Vec::with_capacity(rows.len());
+        sorted_rows.extend_from_slice(header_slice);
+        sorted_rows.extend(keyed.into_iter().map(|(r, _)| r));
+        rows = sorted_rows;
     }
 
     rows
@@ -537,9 +557,13 @@ mod tests {
         let index = CsvIndex::build(&path).unwrap();
         let mut file = File::open(&path).unwrap();
         let overlay = overlay_for(3, 2);
-        let view = sorted_filtered_view(&overlay, &index, &mut file, Some(0), &[]);
-        // original rows: 0="c,3" 1="a,1" 2="b,2" -> sorted by col 0 -> a,b,c -> rows 1,2,0
+        // With freeze_header: false, all rows sorted: 0="c,3", 1="a,1", 2="b,2" -> a,b,c -> rows 1,2,0
+        let view = sorted_filtered_view(&overlay, &index, &mut file, Some(0), &[], false);
         assert_eq!(view, vec![1, 2, 0]);
+
+        // With freeze_header: true, row 0 stays at index 0, data rows 1..2 sorted -> rows 0,1,2
+        let view_frozen = sorted_filtered_view(&overlay, &index, &mut file, Some(0), &[], true);
+        assert_eq!(view_frozen, vec![0, 1, 2]);
         std::fs::remove_file(&path).ok();
     }
 
@@ -550,8 +574,13 @@ mod tests {
         let mut file = File::open(&path).unwrap();
         let overlay = overlay_for(3, 2);
         let filters = vec![FilterCriterion { col: None, query: "av".to_string() }];
-        let view = sorted_filtered_view(&overlay, &index, &mut file, None, &filters);
-        assert_eq!(view, vec![2]); // only "avocado" (row 2) contains "av"
+        // Unpinned: row 2 ("avocado") matches -> [2]
+        let view = sorted_filtered_view(&overlay, &index, &mut file, None, &filters, false);
+        assert_eq!(view, vec![2]);
+
+        // Pinned: row 0 ("apple") is pinned as header, row 2 ("avocado") matches -> [0, 2]
+        let view_frozen = sorted_filtered_view(&overlay, &index, &mut file, None, &filters, true);
+        assert_eq!(view_frozen, vec![0, 2]);
         std::fs::remove_file(&path).ok();
     }
 
@@ -563,8 +592,12 @@ mod tests {
         let overlay = overlay_for(3, 2);
         // Col 0 has names, Col 1 has roles. Filter Col 1 for "developer"
         let filters = vec![FilterCriterion { col: Some(1), query: "developer".to_string() }];
-        let view = sorted_filtered_view(&overlay, &index, &mut file, None, &filters);
+        let view = sorted_filtered_view(&overlay, &index, &mut file, None, &filters, false);
         assert_eq!(view, vec![0, 2]);
+
+        // With freeze_header: true, row 0 (john) is pinned as header, and data row 2 (bob) matches -> [0, 2]
+        let view_frozen = sorted_filtered_view(&overlay, &index, &mut file, None, &filters, true);
+        assert_eq!(view_frozen, vec![0, 2]);
         std::fs::remove_file(&path).ok();
     }
 
@@ -579,7 +612,7 @@ mod tests {
             FilterCriterion { col: Some(1), query: "sales".to_string() },
             FilterCriterion { col: Some(2), query: "east".to_string() },
         ];
-        let view = sorted_filtered_view(&overlay, &index, &mut file, None, &filters);
+        let view = sorted_filtered_view(&overlay, &index, &mut file, None, &filters, false);
         assert_eq!(view, vec![0]);
         std::fs::remove_file(&path).ok();
     }
@@ -591,7 +624,7 @@ mod tests {
         let mut file = File::open(&path).unwrap();
         let overlay = overlay_for(3, 1);
         let filters = vec![FilterCriterion { col: None, query: "banana".to_string() }];
-        let view = sorted_filtered_view(&overlay, &index, &mut file, None, &filters);
+        let view = sorted_filtered_view(&overlay, &index, &mut file, None, &filters, false);
         assert_eq!(view, vec![1]);
         std::fs::remove_file(&path).ok();
     }
@@ -603,7 +636,7 @@ mod tests {
         let mut file = File::open(&path).unwrap();
         let mut overlay = overlay_for(2, 2);
         overlay.set(0, 0, "a".to_string()); // row 0 was "z", now overlay says "a"
-        let view = sorted_filtered_view(&overlay, &index, &mut file, Some(0), &[]);
+        let view = sorted_filtered_view(&overlay, &index, &mut file, Some(0), &[], false);
         // sorted by overlay-merged col 0: "a" (row 0), "y" (row 1) -> [0, 1]
         assert_eq!(view, vec![0, 1]);
         std::fs::remove_file(&path).ok();
@@ -622,7 +655,11 @@ mod tests {
             col: Some(6),
             query: "取引中止".to_string(),
         }];
-        let view = sorted_filtered_view(&overlay, &index, &mut file, None, &filters);
-        assert_eq!(view.len(), 54128);
+        let view_unpinned = sorted_filtered_view(&overlay, &index, &mut file, None, &filters, false);
+        assert_eq!(view_unpinned.len(), 54128);
+
+        let view_pinned = sorted_filtered_view(&overlay, &index, &mut file, None, &filters, true);
+        assert_eq!(view_pinned.len(), 54129);
+        assert_eq!(view_pinned[0], 0);
     }
 }

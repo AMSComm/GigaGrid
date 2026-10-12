@@ -151,7 +151,7 @@ pub fn run() {
 
     #[cfg(desktop)]
     let builder = builder
-        .menu(|app| create_app_menu(app))
+        .menu(create_app_menu)
         .on_menu_event(|app, event| {
             if event.id() == "open-file-dialog" {
                 let _ = app.emit("open-file-dialog", ());
@@ -194,7 +194,8 @@ pub fn run() {
             commands::take_pending_open,
             commands::set_encoding,
             commands::set_line_ending,
-            commands::set_delimiter
+            commands::set_delimiter,
+            commands::set_freeze_header
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

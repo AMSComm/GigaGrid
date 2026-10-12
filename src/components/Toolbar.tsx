@@ -24,6 +24,7 @@ interface ToolbarProps {
   viewActive: boolean;
   filterActive?: boolean;
   hasFilterEdits?: boolean;
+  freezeHeader?: boolean;
   onFilterChange: (active: boolean, rowCount: number) => void;
   onError?: (message: string | null) => void;
 }
@@ -43,6 +44,7 @@ export function Toolbar({
   viewActive: _viewActive,
   filterActive,
   hasFilterEdits,
+  freezeHeader,
   onFilterChange,
   onError,
 }: ToolbarProps) {
@@ -93,7 +95,7 @@ export function Toolbar({
 
     setIsFiltering(true);
     onError?.(null);
-    invoke<number>("set_filters", { tabId, filters: activeCriteria })
+    invoke<number>("set_filters", { tabId, filters: activeCriteria, freezeHeader: freezeHeader ?? true })
       .then((rowCount) => {
         setIsFiltering(false);
         setAppliedCount(activeCriteria.length);
@@ -115,7 +117,7 @@ export function Toolbar({
 
     setIsFiltering(true);
     onError?.(null);
-    invoke<number>("set_filters", { tabId, filters: activeCriteria })
+    invoke<number>("set_filters", { tabId, filters: activeCriteria, freezeHeader: freezeHeader ?? true })
       .then((rowCount) => {
         setIsFiltering(false);
         setAppliedCount(activeCriteria.length);
@@ -147,7 +149,7 @@ export function Toolbar({
     if (isFiltering) return;
     setIsFiltering(true);
     onError?.(null);
-    invoke<number>("set_filters", { tabId, filters: [] })
+    invoke<number>("set_filters", { tabId, filters: [], freezeHeader: freezeHeader ?? true })
       .then((rowCount) => {
         setIsFiltering(false);
         setFilterRules([{ id: nextRuleId.current++, col: null, query: "" }]);

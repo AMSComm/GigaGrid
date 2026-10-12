@@ -2,6 +2,15 @@
 
 All notable changes to **Gigagrid** will be documented in this file.
 
+## [v0.5.3] - 2026-10-12
+
+### 🚀 Features & Enhancements
+- **Preserve Pinned Header During Filter & Sort**: Ensured that the first row of the CSV file (row 0, column header titles) is permanently preserved at index 0 when `freezeHeader` is enabled. Multi-criteria filtering and sorting now evaluate strictly against data rows (row 1+), preventing data rows from masquerading as headers and ensuring the real headers never vanish under filtered views.
+- **Dynamic View Sync on Freeze Header Toggle**: Added the `set_freeze_header` backend IPC command to automatically recompute active filtered/sorted views and invalidate cell caches whenever users toggle sticky header on or off.
+- **Per-Condition Filter Enable/Disable Toggles**: Added individual toggle checkboxes to each filter condition in the multi-criteria filter popover. Users can temporarily disable specific rules without deleting them, allowing rapid comparison between filtered views while preserving typed search queries and column selections.
+
+---
+
 ## [v0.5.2] - 2026-10-12
 
 ### 🚀 Features & Enhancements

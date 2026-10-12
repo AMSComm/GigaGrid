@@ -12,7 +12,7 @@ export interface UpdateInfo {
   hasNativeUpdater?: boolean;
 }
 
-export const CURRENT_VERSION = "0.5.1";
+export const CURRENT_VERSION = "0.5.2";
 export const GITHUB_REPO = "AMSComm/GigaGrid";
 
 export function compareVersions(v1: string, v2: string): number {

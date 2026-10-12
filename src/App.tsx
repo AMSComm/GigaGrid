@@ -41,6 +41,7 @@ interface Tab {
   dirty: boolean;
   filterActive: boolean;
   sortActive: boolean;
+  filterEdits: Set<string>;
 }
 
 const EMPTY_STATS: GridStats = { totalCols: 0, cursor: null, selection: null };
@@ -459,6 +460,7 @@ function App() {
         dirty: false,
         filterActive: false,
         sortActive: false,
+        filterEdits: new Set(),
       };
       tabsRef.current = [...tabsRef.current, newTab];
       setTabs((prev) => [...prev, newTab]);
@@ -750,9 +752,12 @@ function App() {
                     toggleSearch();
                   }}
                   viewActive={activeTab.filterActive || activeTab.sortActive}
+                  filterActive={activeTab.filterActive}
+                  hasFilterEdits={activeTab.filterEdits.size > 0}
                   onFilterChange={(active, rowCount) => {
                     updateTab(activeTab.meta.tab_id, {
                       filterActive: active,
+                      filterEdits: new Set(),
                       meta: { ...activeTab.meta, row_count: rowCount },
                     });
                     gridRefs.current.get(activeTab.meta.tab_id)?.invalidateCache();
@@ -909,6 +914,10 @@ function App() {
                     onError={(message) => updateTab(tab.meta.tab_id, { error: message })}
                     onRowCountChange={(row_count) => updateTab(tab.meta.tab_id, { meta: { ...tab.meta, row_count } })}
                     viewActive={tab.filterActive || tab.sortActive}
+                    filterActive={tab.filterActive}
+                    sortActive={tab.sortActive}
+                    filterEdits={tab.filterEdits}
+                    onFilterEditsChange={(filterEdits) => updateTab(tab.meta.tab_id, { filterEdits })}
                     onSortChange={(active, rowCount) => updateTab(tab.meta.tab_id, { sortActive: active, meta: { ...tab.meta, row_count: rowCount } })}
                   />
                 </ErrorBoundary>

@@ -37,6 +37,7 @@ export const TOOLBAR_SHORTCUTS = {
   freezeHeader: { key: "H", mod: true, shift: true },
   theme: { key: "T", mod: true, shift: true },
   update: { key: "U", mod: true, shift: true },
+  reapplyFilter: { key: "R", mod: true, shift: true },
 } as const;
 
 export function getToolbarShortcutLabel(

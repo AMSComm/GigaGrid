@@ -121,8 +121,8 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({ isOpen, onClose }) =
               <IconSparkles size={18} />
             </div>
             <div>
-              <h3 className="update-dialog-title">Cập nhật phần mềm</h3>
-              <p className="update-dialog-subtitle">Phiên bản hiện tại: v{CURRENT_VERSION}</p>
+              <h3 className="update-dialog-title">Software Update</h3>
+              <p className="update-dialog-subtitle">Current version: v{CURRENT_VERSION}</p>
             </div>
           </div>
           <button
@@ -130,7 +130,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({ isOpen, onClose }) =
             disabled={downloading}
             className="icon-btn"
             style={{ width: 24, height: 24 }}
-            title="Đóng (Esc)"
+            title="Close (Esc)"
           >
             <IconClose />
           </button>
@@ -151,13 +151,13 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({ isOpen, onClose }) =
               }}
             >
               <IconRefresh className="spin-icon" />
-              <span style={{ fontSize: 12 }}>Đang kiểm tra bản cập nhật mới nhất...</span>
+              <span style={{ fontSize: 12 }}>Checking for latest updates...</span>
             </div>
           ) : error ? (
             <div className="update-dialog-alert-error">
               <IconAlertCircle size={18} />
               <div>
-                <p style={{ margin: 0, fontWeight: 600 }}>Không thể kiểm tra cập nhật</p>
+                <p style={{ margin: 0, fontWeight: 600 }}>Failed to check for updates</p>
                 <p style={{ margin: "4px 0 0 0", fontSize: 11, opacity: 0.9 }}>{error}</p>
               </div>
             </div>
@@ -166,15 +166,15 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({ isOpen, onClose }) =
               <div className="update-dialog-banner">
                 <div>
                   <span style={{ fontWeight: 600, color: "var(--primary)", fontSize: 13 }}>
-                    Đã có phiên bản mới: v{updateInfo.latestVersion}
+                    New version available: v{updateInfo.latestVersion}
                   </span>
                   <p style={{ margin: "2px 0 0 0", fontSize: 11, color: "#888" }}>
                     {updateInfo.releaseDate
-                      ? `Phát hành ngày ${new Date(updateInfo.releaseDate).toLocaleDateString()}`
-                      : "Bản cập nhật được khuyến nghị"}
+                      ? `Released on ${new Date(updateInfo.releaseDate).toLocaleDateString()}`
+                      : "Recommended update"}
                   </p>
                 </div>
-                <span className="update-dialog-badge">MỚI</span>
+                <span className="update-dialog-badge">NEW</span>
               </div>
 
               {updateInfo.notes && (
@@ -193,10 +193,10 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({ isOpen, onClose }) =
                   >
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                       <IconRefresh className="spin-icon" />
-                      Đang tải và chuẩn bị cài đặt...
+                      Downloading and preparing to install...
                     </span>
                     <span style={{ fontFamily: "monospace", color: "var(--primary)" }}>
-                      {progress !== null ? `${progress}%` : "Đang xử lý"}
+                      {progress !== null ? `${progress}%` : "Processing..."}
                     </span>
                   </div>
                   <div className="update-dialog-progress-bar">
@@ -206,7 +206,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({ isOpen, onClose }) =
                     />
                   </div>
                   <p style={{ margin: "6px 0 0 0", fontSize: 10, color: "#888" }}>
-                    Ứng dụng sẽ tự động khởi động lại sau khi cập nhật xong.
+                    The application will restart automatically after the update completes.
                   </p>
                 </div>
               )}
@@ -214,7 +214,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({ isOpen, onClose }) =
               {installSuccess && (
                 <div className="update-dialog-alert-success">
                   <IconCheckCircle size={16} />
-                  <span>Cập nhật hoàn tất! Đang khởi động lại ứng dụng...</span>
+                  <span>Update completed! Restarting application...</span>
                 </div>
               )}
             </div>
@@ -234,10 +234,10 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({ isOpen, onClose }) =
                 <IconCheckCircle size={32} />
               </span>
               <p style={{ margin: 0, fontWeight: 600, fontSize: 14 }}>
-                Gigagrid đang ở phiên bản mới nhất
+                Gigagrid is up to date
               </p>
               <p style={{ margin: 0, fontSize: 12, color: "#888" }}>
-                Bạn đang sử dụng phiên bản v{CURRENT_VERSION}.
+                You are running version v{CURRENT_VERSION}.
               </p>
             </div>
           )}
@@ -252,7 +252,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({ isOpen, onClose }) =
             className="btn-link"
           >
             <IconRefresh className={loading ? "spin-icon" : undefined} />
-            <span>Kiểm tra lại</span>
+            <span>Check Again</span>
           </button>
 
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -264,7 +264,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({ isOpen, onClose }) =
                 className="btn-primary"
               >
                 <IconDownload />
-                <span>{downloading ? "Đang cập nhật..." : "Cập nhật & Khởi động lại"}</span>
+                <span>{downloading ? "Updating..." : "Update & Restart"}</span>
               </button>
             )}
 
@@ -279,7 +279,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({ isOpen, onClose }) =
                   style={{ textDecoration: "none" }}
                 >
                   <IconExternalLink size={13} />
-                  <span>Xem trên GitHub</span>
+                  <span>View on GitHub</span>
                 </a>
               )}
 
@@ -289,7 +289,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({ isOpen, onClose }) =
               disabled={downloading}
               className="btn-secondary"
             >
-              Đóng
+              Close
             </button>
           </div>
         </div>

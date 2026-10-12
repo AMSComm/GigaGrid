@@ -11,6 +11,7 @@ interface CellProps {
   onCommit: (value: string) => void;
   onEditEnd: () => void;
   onOverflow?: () => void;
+  isModified?: boolean;
 }
 
 /** One editable cell: double-click/Enter (parent decides which cell, via
@@ -21,7 +22,7 @@ interface CellProps {
  * newline, plain Enter still commits. While editing, reports whether the
  * content still overflows the grown box so the parent Grid can auto-scroll
  * to reveal it. */
-export function Cell({ value, editing, onRequestEdit, onCommit, onEditEnd, onOverflow }: CellProps) {
+export function Cell({ value, editing, onRequestEdit, onCommit, onEditEnd, onOverflow, isModified }: CellProps) {
   const [draft, setDraft] = useState(value);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -125,8 +126,24 @@ export function Cell({ value, editing, onRequestEdit, onCommit, onEditEnd, onOve
         overflow: "hidden",
         textOverflow: "ellipsis",
         width: "100%",
+        position: "relative",
       }}
     >
+      {isModified && (
+        <span
+          style={{
+            position: "absolute",
+            top: 2,
+            right: 2,
+            width: 5,
+            height: 5,
+            borderRadius: "50%",
+            backgroundColor: "#f59e0b",
+            pointerEvents: "none",
+          }}
+          title="Edited under filter"
+        />
+      )}
       {value}
     </div>
   );

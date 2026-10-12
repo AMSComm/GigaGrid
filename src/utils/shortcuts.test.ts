@@ -31,7 +31,7 @@ describe("shortcuts utility", () => {
 
   it("provides valid toolbar shortcut labels for all registered actions", () => {
     const actions = Object.keys(TOOLBAR_SHORTCUTS) as Array<keyof typeof TOOLBAR_SHORTCUTS>;
-    expect(actions.length).toBe(10);
+    expect(actions.length).toBe(11);
 
     for (const action of actions) {
       const macLabel = getToolbarShortcutLabel(action, true);

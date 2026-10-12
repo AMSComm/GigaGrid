@@ -192,6 +192,10 @@ interface GridProps {
   // fresh count back up so it doesn't go stale.
   onRowCountChange?: (rowCount: number) => void;
   viewActive: boolean;
+  filterActive?: boolean;
+  sortActive?: boolean;
+  filterEdits?: Set<string>;
+  onFilterEditsChange?: (edits: Set<string>) => void;
   onSortChange: (active: boolean, rowCount: number) => void;
 }
 
@@ -214,7 +218,24 @@ interface CellPos {
   col: number;
 }
 
-export const Grid = forwardRef<GridHandle, GridProps>(function Grid({ tabId, rowCount, showGridChrome, freezeHeader, freezeCols, onFreezeColsChange, onStatsChange, onDirtyChange, onError, onRowCountChange, viewActive, onSortChange }, ref) {
+export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
+  tabId,
+  rowCount,
+  showGridChrome,
+  freezeHeader,
+  freezeCols,
+  onFreezeColsChange,
+  onStatsChange,
+  onDirtyChange,
+  onError,
+  onRowCountChange,
+  viewActive,
+  filterActive,
+  sortActive,
+  filterEdits,
+  onFilterEditsChange,
+  onSortChange,
+}, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const fetchTimer = useRef<number | null>(null);
   const statsRequestId = useRef(0);
@@ -461,6 +482,11 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({ tabId, row
         next.set(rowIndex, updated);
         return next;
       });
+      if (filterActive) {
+        const nextEdits = new Set(filterEdits);
+        nextEdits.add(`${rowIndex},${colIndex}`);
+        onFilterEditsChange?.(nextEdits);
+      }
       onDirtyChange?.(true);
     });
   }
@@ -633,7 +659,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({ tabId, row
   // box replaces the multi-cell highlight with the single cell being typed
   // into, and becomes the new anchor for navigation once editing ends.
   function requestEdit(row: number, col: number) {
-    if (viewActive) { onError?.("Clear filter/sort to edit cells"); return; }
+    if (sortActive) { onError?.("Clear sort to edit cells"); return; }
     setEditingCell({ row, col });
     setSelStart({ row, col });
     setSelEnd({ row, col });
@@ -762,7 +788,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({ tabId, row
   }
 
   async function pasteSelection() {
-    if (viewActive) { onError?.("Clear filter/sort to edit cells"); return; }
+    if (sortActive) { onError?.("Clear sort to edit cells"); return; }
     const b = selectionBounds();
     if (!b) return;
     try {
@@ -783,6 +809,13 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({ tabId, row
         await invoke("set_cells_batch", { tabId, edits: batch });
       }
       onDirtyChange?.(true);
+      if (filterActive) {
+        const nextEdits = new Set(filterEdits);
+        for (const [r, c] of edits) {
+          nextEdits.add(`${r},${c}`);
+        }
+        onFilterEditsChange?.(nextEdits);
+      }
       setRowsByIndex((prev) => {
         const next = new Map(prev);
         for (const [r, c, v] of edits) {
@@ -1045,6 +1078,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({ tabId, row
                   onCommit={(v) => commitCell(0, ci, v)}
                   onOverflow={() => handleOverflow(0)}
                   onEditEnd={endEdit}
+                  isModified={Boolean(filterActive && filterEdits?.has(`0,${ci}`))}
                 />
               </div>
             ))
@@ -1159,6 +1193,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({ tabId, row
                         onCommit={(v) => commitCell(rowIndex, ci, v)}
                         onOverflow={() => handleOverflow(rowIndex)}
                         onEditEnd={endEdit}
+                        isModified={Boolean(filterActive && filterEdits?.has(`${rowIndex},${ci}`))}
                       />
                     </div>
                   ))

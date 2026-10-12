@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { IconSearch, IconHash, IconFilter } from "../icons";
+import { IconSearch, IconHash, IconFilter, IconRefresh } from "../icons";
 import { getToolbarShortcutLabel } from "../utils/shortcuts";
 
 export interface FilterRule {
@@ -22,6 +22,8 @@ interface ToolbarProps {
   onNavigate: (row: number, col?: number) => void;
   onToggleSearch: () => void;
   viewActive: boolean;
+  filterActive?: boolean;
+  hasFilterEdits?: boolean;
   onFilterChange: (active: boolean, rowCount: number) => void;
 }
 
@@ -38,6 +40,8 @@ export function Toolbar({
   onNavigate,
   onToggleSearch,
   viewActive: _viewActive,
+  filterActive,
+  hasFilterEdits,
   onFilterChange,
 }: ToolbarProps) {
   const [gotoRow, setGotoRow] = useState("");
@@ -89,6 +93,32 @@ export function Toolbar({
       onCloseFilter();
     });
   }
+
+  function reapplyFilters() {
+    const activeCriteria = filterRules
+      .filter((r) => r.query.trim().length > 0)
+      .map((r) => ({ col: r.col, query: r.query.trim() }));
+
+    invoke<number>("set_filters", { tabId, filters: activeCriteria }).then((rowCount) => {
+      setAppliedCount(activeCriteria.length);
+      onFilterChange(activeCriteria.length > 0, rowCount);
+    });
+  }
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+      const mod = isMac ? e.metaKey : e.ctrlKey;
+      if (mod && !e.altKey && e.shiftKey && e.key.toLowerCase() === "r") {
+        if (filterActive && hasFilterEdits) {
+          e.preventDefault();
+          reapplyFilters();
+        }
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [filterActive, hasFilterEdits, filterRules, tabId]);
 
   function clearAllFilters() {
     invoke<number>("set_filters", { tabId, filters: [] }).then((rowCount) => {
@@ -325,13 +355,34 @@ export function Toolbar({
                     fontWeight: 500,
                   }}
                 >
-                  Apply
+                  {appliedCount > 0 ? "Re-apply" : "Apply"}
                 </button>
               </div>
             </div>
           </div>
         )}
       </div>
+
+      <button
+        type="button"
+        className="icon-btn"
+        data-action="reapply-filter"
+        disabled={!filterActive || !hasFilterEdits}
+        style={{
+          opacity: filterActive && hasFilterEdits ? 1 : 0.4,
+          cursor: filterActive && hasFilterEdits ? "pointer" : "not-allowed",
+          color: filterActive && hasFilterEdits ? "var(--primary, #396cd8)" : undefined,
+        }}
+        title={
+          filterActive && hasFilterEdits
+            ? `Re-apply filter (${getToolbarShortcutLabel("reapplyFilter")})`
+            : "Re-apply filter (no modified cells)"
+        }
+        aria-label={`Re-apply filter (${getToolbarShortcutLabel("reapplyFilter")})`}
+        onClick={reapplyFilters}
+      >
+        <IconRefresh />
+      </button>
 
       <div style={{ position: "relative" }} className="goto-popover-anchor">
         <button

@@ -402,6 +402,22 @@ pub fn set_delimiter(
     Ok(FileMeta { tab_id, path, row_count, format, encoding: encoding_label, line_ending: line_ending_label })
 }
 
+pub fn set_cell_impl(open_file: &mut OpenFile, row: usize, col: usize, value: String) {
+    let target_row = open_file.view.as_ref().and_then(|v| v.get(row).copied()).unwrap_or(row);
+    open_file.overlay.set(target_row, col, value);
+}
+
+pub fn set_cells_batch_impl(open_file: &mut OpenFile, edits: Vec<(usize, usize, String)>) {
+    let remapped_edits: Vec<(usize, usize, String)> = edits
+        .into_iter()
+        .map(|(r, c, v)| {
+            let target_r = open_file.view.as_ref().and_then(|view| view.get(r).copied()).unwrap_or(r);
+            (target_r, c, v)
+        })
+        .collect();
+    open_file.overlay.set_many(remapped_edits);
+}
+
 #[tauri::command]
 pub fn set_cell(
     row: usize,
@@ -412,7 +428,7 @@ pub fn set_cell(
 ) -> Result<(), String> {
     let mut guard = state.lock().map_err(|e| e.to_string())?;
     let open_file = guard.files.get_mut(&tab_id).ok_or_else(|| "tab not found".to_string())?;
-    open_file.overlay.set(row, col, value);
+    set_cell_impl(open_file, row, col, value);
     Ok(())
 }
 
@@ -426,7 +442,7 @@ pub fn set_cells_batch(
 ) -> Result<(), String> {
     let mut guard = state.lock().map_err(|e| e.to_string())?;
     let open_file = guard.files.get_mut(&tab_id).ok_or_else(|| "tab not found".to_string())?;
-    open_file.overlay.set_many(edits);
+    set_cells_batch_impl(open_file, edits);
     Ok(())
 }
 
@@ -805,6 +821,62 @@ mod tests {
         let text_stats = get_selection_stats_impl(&open_file, 0, 2, 0, 0).unwrap();
         assert_eq!(text_stats.numeric_count, 0);
         assert_eq!(text_stats.sum, 0.0);
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn set_cell_impl_remaps_through_active_view() {
+        let path = write_temp("set_cell_view", "zero,0\none,1\ntwo,2\n");
+        let index = CsvIndex::build(&path).unwrap();
+        let mut open_file = OpenFile {
+            path: path.clone(),
+            index,
+            overlay: Overlay::new(3, 2),
+            // Active view displays row 2 first, then row 0: view = [2, 0]
+            view: Some(vec![2, 0]),
+            sort_col: None,
+            filters: Vec::new(),
+        };
+
+        // Edit display row 0 (which is logical row 2 in the original file)
+        set_cell_impl(&mut open_file, 0, 0, "MODIFIED_TWO".to_string());
+
+        // Overlay should record the edit on logical row 2, NOT logical row 0
+        assert_eq!(open_file.overlay.get(2, 0), Some(&"MODIFIED_TWO".to_string()));
+        assert_eq!(open_file.overlay.get(0, 0), None);
+
+        // Reading through view should reflect the change on display row 0
+        let rows = get_rows_impl(&open_file, 0, 2).unwrap();
+        assert_eq!(rows[0][0], "MODIFIED_TWO");
+        assert_eq!(rows[1][0], "zero");
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn set_cells_batch_impl_remaps_through_active_view() {
+        let path = write_temp("set_batch_view", "r0,a\nr1,b\nr2,c\n");
+        let index = CsvIndex::build(&path).unwrap();
+        let mut open_file = OpenFile {
+            path: path.clone(),
+            index,
+            overlay: Overlay::new(3, 2),
+            view: Some(vec![2, 1]), // display 0 -> row 2, display 1 -> row 1
+            sort_col: None,
+            filters: Vec::new(),
+        };
+
+        // Batch edit display rows 0 and 1
+        set_cells_batch_impl(&mut open_file, vec![
+            (0, 1, "NEW_C".to_string()),
+            (1, 1, "NEW_B".to_string()),
+        ]);
+
+        // Overlay should have edits mapped to rows 2 and 1
+        assert_eq!(open_file.overlay.get(2, 1), Some(&"NEW_C".to_string()));
+        assert_eq!(open_file.overlay.get(1, 1), Some(&"NEW_B".to_string()));
+        assert_eq!(open_file.overlay.get(0, 1), None);
 
         std::fs::remove_file(&path).ok();
     }

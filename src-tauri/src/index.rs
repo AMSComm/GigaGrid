@@ -301,6 +301,34 @@ impl CsvIndex {
 
         Ok(parse_csv_line(&buf, self.delimiter, self.encoding))
     }
+
+    /// Read consecutive rows [start_row..end_row) in a single seek + single read_exact.
+    pub fn read_rows(&self, file: &mut File, start_row: usize, end_row: usize) -> io::Result<Vec<Vec<String>>> {
+        if start_row >= end_row {
+            return Ok(Vec::new());
+        }
+        if end_row > self.row_count() {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "row out of range"));
+        }
+        let start_byte = self.offsets[start_row];
+        let end_byte = self.offsets[end_row];
+        let total_len = (end_byte - start_byte) as usize;
+        let mut buf = vec![0u8; total_len];
+        file.seek(SeekFrom::Start(start_byte))?;
+        file.read_exact(&mut buf)?;
+
+        let mut rows = Vec::with_capacity(end_row - start_row);
+        for r in start_row..end_row {
+            let row_start = (self.offsets[r] - start_byte) as usize;
+            let row_end = (self.offsets[r + 1] - start_byte) as usize;
+            let mut slice = &buf[row_start..row_end];
+            while matches!(slice.last(), Some(b'\n') | Some(b'\r')) {
+                slice = &slice[..slice.len() - 1];
+            }
+            rows.push(parse_csv_line(slice, self.delimiter, self.encoding));
+        }
+        Ok(rows)
+    }
 }
 
 fn parse_csv_line(bytes: &[u8], delimiter: u8, encoding: &'static Encoding) -> Vec<String> {
@@ -570,6 +598,65 @@ mod tests {
         let mut file = File::open(&path).unwrap();
         assert_eq!(idx.read_row(&mut file, 0).unwrap(), vec!["名前", "年齢", "都市"]);
         std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_read_rows_batch() {
+        let text = "col1,col2\nval1,val2\nval3,val4\nval5,val6\n";
+        let mut path = std::env::temp_dir();
+        path.push(format!("gigagrid_batch_{}.csv", std::process::id()));
+        std::fs::write(&path, text.as_bytes()).unwrap();
+
+        let idx = CsvIndex::build(&path).unwrap();
+        assert_eq!(idx.row_count(), 4);
+
+        let mut file = File::open(&path).unwrap();
+        let rows = idx.read_rows(&mut file, 1, 3).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0], vec!["val1", "val2"]);
+        assert_eq!(rows[1], vec!["val3", "val4"]);
+
+        let all_rows = idx.read_rows(&mut file, 0, 4).unwrap();
+        assert_eq!(all_rows.len(), 4);
+        assert_eq!(all_rows[0], vec!["col1", "col2"]);
+        assert_eq!(all_rows[3], vec!["val5", "val6"]);
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    #[ignore]
+    fn test_journal_detail_file() {
+        let path = std::path::PathBuf::from("/Users/huy/Downloads/journal_detail_202606.csv");
+        if !path.exists() {
+            return;
+        }
+        let t0 = std::time::Instant::now();
+        let idx = CsvIndex::build(&path).unwrap();
+        println!(
+            "Indexed {} rows in {:?}",
+            idx.row_count(),
+            t0.elapsed()
+        );
+        assert_eq!(idx.row_count(), 1_993_363);
+
+        let mut file = File::open(&path).unwrap();
+
+        let t1 = std::time::Instant::now();
+        let row_0 = idx.read_row(&mut file, 0).unwrap();
+        println!("read_row(0): {:?}, cols: {}", t1.elapsed(), row_0.len());
+        assert_eq!(row_0.len(), 30);
+
+        let t2 = std::time::Instant::now();
+        let batch_100 = idx.read_rows(&mut file, 100_000, 100_100).unwrap();
+        println!("read_rows(100 rows at 100k): {:?}", t2.elapsed());
+        assert_eq!(batch_100.len(), 100);
+        assert_eq!(batch_100[0].len(), 30);
+
+        let t3 = std::time::Instant::now();
+        let batch_500 = idx.read_rows(&mut file, 1_500_000, 1_500_500).unwrap();
+        println!("read_rows(500 rows at 1.5M): {:?}", t3.elapsed());
+        assert_eq!(batch_500.len(), 500);
     }
 
     /// Not part of the regular suite — generates a ~1GB synthetic CSV and

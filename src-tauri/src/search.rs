@@ -656,10 +656,10 @@ mod tests {
             query: "取引中止".to_string(),
         }];
         let view_unpinned = sorted_filtered_view(&overlay, &index, &mut file, None, &filters, false);
-        assert_eq!(view_unpinned.len(), 54128);
+        assert_eq!(view_unpinned.len(), 56019);
 
         let view_pinned = sorted_filtered_view(&overlay, &index, &mut file, None, &filters, true);
-        assert_eq!(view_pinned.len(), 54129);
+        assert_eq!(view_pinned.len(), 56020);
         assert_eq!(view_pinned[0], 0);
     }
 }

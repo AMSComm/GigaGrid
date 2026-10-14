@@ -122,6 +122,15 @@ fn get_rows_impl(
     let mut file = File::open(&open_file.path).map_err(|e| e.to_string())?;
     let total = view_len(open_file);
     let end = (start + count).min(total);
+
+    // Fast-path: when there is no active filter/sort view, and rows are unmodified original CSV rows
+    if open_file.view.is_none() && open_file.overlay.is_identity_range(start, end) {
+        return open_file
+            .index
+            .read_rows(&mut file, start, end)
+            .map_err(|e| e.to_string());
+    }
+
     let mut rows = Vec::with_capacity(end.saturating_sub(start));
     for i in start..end {
         // remap through the active view (if any) to the LOGICAL row index

@@ -106,6 +106,33 @@ impl Overlay {
         }
     }
 
+    /// Returns true if logical rows [start..end) correspond exactly to original rows
+    /// [start..end) with original columns in order and without any cell edits.
+    pub fn is_identity_range(&self, start: usize, end: usize) -> bool {
+        if !self.cell_edits.is_empty() {
+            for &(row_key, _) in self.cell_edits.keys() {
+                if let RowKey::Original(r) = row_key {
+                    if r >= start && r < end {
+                        return false;
+                    }
+                } else {
+                    return false;
+                }
+            }
+        }
+        for (i, &col_key) in self.col_order.iter().enumerate() {
+            if col_key != ColKey::Original(i) {
+                return false;
+            }
+        }
+        for r in start..end {
+            if self.row_order.get(r) != Some(&RowKey::Original(r)) {
+                return false;
+            }
+        }
+        true
+    }
+
     fn cell_key(&self, row: usize, col: usize) -> Option<CellKey> {
         Some((*self.row_order.get(row)?, *self.col_order.get(col)?))
     }
@@ -587,5 +614,24 @@ mod tests {
             vec!["", "", "X"]
         );
         std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_is_identity_range() {
+        let mut overlay = Overlay::new(10, 3);
+        assert!(overlay.is_identity_range(0, 10));
+        assert!(overlay.is_identity_range(2, 5));
+
+        // Edit cell at (3, 1)
+        overlay.set(3, 1, "MODIFIED".to_string());
+        assert!(overlay.is_identity_range(0, 3));
+        assert!(!overlay.is_identity_range(0, 4));
+        assert!(!overlay.is_identity_range(3, 5));
+        assert!(overlay.is_identity_range(4, 10));
+
+        // Insert row at 1
+        let mut overlay2 = Overlay::new(5, 2);
+        overlay2.insert_row(1);
+        assert!(!overlay2.is_identity_range(0, 6));
     }
 }

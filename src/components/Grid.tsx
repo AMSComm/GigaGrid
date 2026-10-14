@@ -126,6 +126,15 @@ export function computeDomRowTop(
   return physicalScrollTop + (offset * rowHeight - virtualScrollTop);
 }
 
+export function computeCellBackground(isSel: boolean, isFrozenCol: boolean): string | undefined {
+  if (isFrozenCol) {
+    return isSel
+      ? "linear-gradient(rgba(70,130,255,0.25), rgba(70,130,255,0.25)) var(--bg)"
+      : "var(--bg)";
+  }
+  return isSel ? "rgba(70,130,255,0.25)" : undefined;
+}
+
 export interface VisibleRange {
   start: number;
   count: number;
@@ -240,6 +249,27 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
   const fetchTimer = useRef<number | null>(null);
   const statsRequestId = useRef(0);
   const [scrollTop, setScrollTop] = useState(0);
+  const rafScrollId = useRef<number | null>(null);
+  const pendingScrollTop = useRef(0);
+
+  useEffect(() => {
+    return () => {
+      if (rafScrollId.current !== null) {
+        window.cancelAnimationFrame(rafScrollId.current);
+      }
+    };
+  }, []);
+
+  function handleScroll(e: React.UIEvent<HTMLDivElement>) {
+    pendingScrollTop.current = e.currentTarget.scrollTop;
+    if (rafScrollId.current === null) {
+      rafScrollId.current = window.requestAnimationFrame(() => {
+        rafScrollId.current = null;
+        setScrollTop(pendingScrollTop.current);
+      });
+    }
+  }
+
   const [viewportHeight, setViewportHeight] = useState(0);
   const [rowsByIndex, setRowsByIndex] = useState<Map<number, string[]>>(new Map());
   const [selStart, setSelStart] = useState<CellPos | null>(null);
@@ -284,6 +314,14 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
   useEffect(() => {
     onStatsChangeRef.current = onStatsChange;
   });
+
+  const lastEmittedStatsRef = useRef<string>("");
+  const emitStats = (stats: GridStats) => {
+    const key = JSON.stringify(stats);
+    if (key === lastEmittedStatsRef.current) return;
+    lastEmittedStatsRef.current = key;
+    onStatsChangeRef.current?.(stats);
+  };
   const [colWidths, setColWidths] = useState<Record<number, number>>({});
   const selectingRef = useRef(false);
 
@@ -442,13 +480,30 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
 
     if (fetchTimer.current !== null) window.clearTimeout(fetchTimer.current);
     fetchTimer.current = window.setTimeout(() => {
-      invoke<string[][]>("get_rows", { tabId, start: fetchStart, count: range.count })
+      const PREFETCH_PADDING = 50;
+      const actualStart = Math.max(0, fetchStart - PREFETCH_PADDING);
+      const actualEnd = Math.min(rowCount, fetchStart + range.count + PREFETCH_PADDING);
+      const actualCount = actualEnd - actualStart;
+
+      invoke<string[][]>("get_rows", { tabId, start: actualStart, count: actualCount })
         .then((rows) => {
           setRowsByIndex((prev) => {
-            const next = prev.size > MAX_CACHE_ROWS ? new Map<number, string[]>() : new Map(prev);
+            let next: Map<number, string[]>;
+            if (prev.size + rows.length > MAX_CACHE_ROWS) {
+              next = new Map<number, string[]>();
+              const rowZero = prev.get(0);
+              if (rowZero) next.set(0, rowZero);
+              for (const [r, rowData] of prev.entries()) {
+                if (r >= actualStart - 1000 && r <= actualEnd + 1000) {
+                  next.set(r, rowData);
+                }
+              }
+            } else {
+              next = new Map(prev);
+            }
             const rowZero = prev.get(0);
             if (rowZero) next.set(0, rowZero);
-            rows.forEach((row, i) => next.set(fetchStart + i, row));
+            rows.forEach((row, i) => next.set(actualStart + i, row));
             return next;
           });
           onError?.(null);
@@ -523,7 +578,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
     const b = selectionBounds();
     const colCount = rowsByIndex.get(0)?.length ?? 0;
     if (!b) {
-      onStatsChangeRef.current?.({
+      emitStats({
         totalCols: colCount,
         cursor: selEnd,
         selection: null,
@@ -568,7 +623,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
           }
         }
       }
-      onStatsChangeRef.current?.({
+      emitStats({
         totalCols: colCount,
         cursor: selEnd,
         selection: {
@@ -584,7 +639,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
     }
 
     // Uncached / large selection: immediately emit dimension info with loading=true
-    onStatsChangeRef.current?.({
+    emitStats({
       totalCols: colCount,
       cursor: selEnd,
       selection: {
@@ -612,7 +667,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
       })
         .then((res) => {
           if (statsRequestId.current === reqId) {
-            onStatsChangeRef.current?.({
+            emitStats({
               totalCols: colCount,
               cursor: selEnd,
               selection: {
@@ -628,7 +683,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
         })
         .catch(() => {
           if (statsRequestId.current === reqId) {
-            onStatsChangeRef.current?.({
+            emitStats({
               totalCols: colCount,
               cursor: selEnd,
               selection: {
@@ -650,6 +705,10 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
     const b = selectionBounds();
     if (!b) return false;
     return row >= b.rowMin && row <= b.rowMax && col >= b.colMin && col <= b.colMax;
+  }
+
+  function getCellBackground(row: number, col: number, isFrozenCol: boolean): string | undefined {
+    return computeCellBackground(isSelected(row, col), isFrozenCol);
   }
 
   function startSelect(row: number, col: number) {
@@ -953,7 +1012,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
       ref={containerRef}
       data-gigagrid-scroll
       tabIndex={0}
-      onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+      onScroll={handleScroll}
       onKeyDown={handleKeyDown}
       style={{ overflow: "auto", height: "100%", position: "relative", outline: "none", userSelect: "none" }}
     >
@@ -1042,6 +1101,20 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
         >
           {showGridChrome && (
             <div
+              onMouseDown={(e) => {
+                e.preventDefault();
+                if (e.shiftKey && selStart) {
+                  setSelEnd({ row: 0, col: colCount - 1 });
+                } else {
+                  setSelStart({ row: 0, col: 0 });
+                  setSelEnd({ row: 0, col: colCount - 1 });
+                }
+                containerRef.current?.focus();
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setContextMenu({ x: e.clientX, y: e.clientY, kind: "row", index: 0 });
+              }}
               style={{
                 position: "sticky",
                 left: 0,
@@ -1055,6 +1128,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
+                cursor: "pointer",
                 ...chromeBorder,
               }}
             >
@@ -1065,17 +1139,27 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
             frozenRow.map((cell, ci) => (
               <div
                 key={ci}
+                onMouseDown={(e) => {
+                  if ((e.target as HTMLElement).tagName === "TEXTAREA") return;
+                  e.preventDefault();
+                  if (e.shiftKey && selStart) {
+                    setSelEnd({ row: 0, col: ci });
+                  } else {
+                    startSelect(0, ci);
+                  }
+                }}
+                onMouseEnter={() => extendSelect(0, ci)}
                 style={{
                   position: "relative",
                   flexShrink: 0,
                   width: colWidths[ci] ?? DEFAULT_COL_WIDTH,
+                  background: getCellBackground(0, ci, ci < freezeCols),
                   ...chromeBorder,
                   ...(ci < freezeCols
                     ? {
                         position: "sticky" as const,
                         left: frozenLeft(ci),
                         zIndex: 1,
-                        background: "var(--bg)",
                         ...(ci === freezeCols - 1 ? { borderRight: "2px solid var(--border)" } : {}),
                       }
                     : {}),
@@ -1185,13 +1269,12 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
                         position: "relative",
                         flexShrink: 0,
                         width: colWidths[ci] ?? DEFAULT_COL_WIDTH,
-                        background: isSelected(rowIndex, ci) ? "rgba(70,130,255,0.25)" : undefined,
+                        background: getCellBackground(rowIndex, ci, ci < freezeCols),
                         ...chromeBorder,
                         ...(ci < freezeCols ? {
                           position: "sticky" as const,
                           left: frozenLeft(ci),
                           zIndex: 1,
-                          background: "var(--bg)",
                           ...(ci === freezeCols - 1 ? { borderRight: "2px solid var(--border)" } : {}),
                         } : {}),
                       }}

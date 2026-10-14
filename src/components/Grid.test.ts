@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  computeCellBackground,
   computeDomRowTop,
   computeGutterWidth,
   computeScrollMetrics,
@@ -302,6 +303,26 @@ describe("virtual scroll scaling (handling > 1 million rows)", () => {
     const freezeVisualY = freezeTopCover + freezeDomTop - freezeMetrics.maxPhysicalScroll;
     const freezeVisualBottom = freezeVisualY + rowHeight;
     expect(freezeVisualBottom).toBe(viewportHeight);
+  });
+});
+
+describe("computeCellBackground", () => {
+  it("returns undefined for non-frozen, unselected cell", () => {
+    expect(computeCellBackground(false, false)).toBeUndefined();
+  });
+
+  it("returns selection rgba for non-frozen, selected cell", () => {
+    expect(computeCellBackground(true, false)).toBe("rgba(70,130,255,0.25)");
+  });
+
+  it("returns var(--bg) for frozen, unselected cell to keep it opaque", () => {
+    expect(computeCellBackground(false, true)).toBe("var(--bg)");
+  });
+
+  it("returns layered gradient and var(--bg) for frozen, selected cell so highlight is visible and opaque", () => {
+    expect(computeCellBackground(true, true)).toBe(
+      "linear-gradient(rgba(70,130,255,0.25), rgba(70,130,255,0.25)) var(--bg)",
+    );
   });
 });
 

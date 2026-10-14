@@ -2,6 +2,21 @@
 
 All notable changes to **Gigagrid** will be documented in this file.
 
+## [v0.5.4] - 2026-10-14
+
+### 🚀 Features & Performance Optimizations
+- **Large Dataset Smooth Scrolling Optimization**: Drastically reduced scrolling stutter and CPU overhead on multi-million row files (e.g. 2M rows × 30 columns):
+  - **Scroll Throttling via `requestAnimationFrame`**: Throttled high-frequency scroll events (up to 120Hz on macOS trackpads) to sync directly with display refresh rate, eliminating duplicate React render cycles.
+  - **Lightweight Static Cell Rendering**: Extracted text editing into an on-demand `<EditingCell>` component. Static non-editing cells (99.9% of cells on screen) now render as pure, hook-free DOM elements wrapped with `React.memo`, removing 4,500+ hook evaluations per scroll frame.
+  - **Eliminated Cascading App Root Re-renders**: Deduplicated selection stats emissions so uncached row fetching no longer triggers redundant state updates across the root `App` component.
+  - **Sliding Window Prefetch & Smart Cache**: Expanded prefetch buffer around the visible viewport and retained nearby rows upon cache pruning instead of wiping the entire cache.
+  - **Backend Contiguous Batch Read**: Added single-seek, single-read batch row parsing (`read_rows`) in Rust when reading sequential unmodified rows, fetching 100 rows in under 1 millisecond.
+
+### 🐛 Bug Fixes
+- **Cell Selection on Frozen Columns & Headers**: Fixed an issue where cells in frozen sticky columns were not visually highlighted when selected due to background property overrides. Combined the selection highlight with an opaque background (`linear-gradient(...) var(--bg)`), ensuring selections are clearly visible while preventing scrolling content from bleeding through. Added full mouse selection and gutter click support to the pinned header row (`freezeHeader`).
+
+---
+
 ## [v0.5.3] - 2026-10-12
 
 ### 🚀 Features & Enhancements

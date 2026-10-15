@@ -2,6 +2,23 @@
 
 All notable changes to **Gigagrid** will be documented in this file.
 
+## [v0.5.5] - 2026-10-15
+
+### 🚀 Features & Enhancements
+- **Auto-Fit Column Width on Double Click**: Double-clicking the column resize handle now automatically calculates and snaps the column width to fit its content:
+  - **Dynamic Content Measurement**: Measures column headers, chrome labels, and all cached row values using Canvas 2D font metrics (`Inter 13px`) with a robust headless fallback, respecting horizontal cell padding (`CELL_HORIZONTAL_PADDING = 24px`) and bounds (`[40px, 800px]`).
+  - **Multi-Column Selection Support**: When multiple columns are selected, double-clicking any selected column's resize handle auto-fits all selected columns simultaneously (matching Excel/Google Sheets behavior).
+  - **Ergonomic Resize Handle**: Expanded the resize target area to 6px (`right: -3px`, `zIndex: 2`) centered directly on the column border for easy targeting without accidental drag jitter.
+  - **Context Menu Action**: Added a direct "Auto-fit column width" action to the column header right-click context menu.
+  - **Frozen Header Support**: Embedded the resize and auto-fit handle into the sticky pinned header row (`frozenRow`) as well as the chrome header row.
+
+### 🐛 Bug Fixes & CI Improvements
+- **Automatic Release Notes Sync in Updater**: Fixed an issue where the updater dialog displayed a static generic "Highlights" template instead of the release changelog:
+  - **CI Workflow Changelog Extraction**: Enhanced `.github/workflows/release.yml` to automatically extract the release section from `CHANGELOG.md` and inject it directly into `tauri-action`'s `releaseBody`, ensuring `latest.json` contains the full changelog upon initial generation.
+  - **Smart Client Fallback**: Enhanced client-side `checkForAppUpdates` in `updater.ts` to detect boilerplate "Highlights" notes and fetch the detailed release notes directly from GitHub Releases API.
+
+---
+
 ## [v0.5.4] - 2026-10-14
 
 ### 🚀 Features & Performance Optimizations

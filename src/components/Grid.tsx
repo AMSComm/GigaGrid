@@ -23,9 +23,113 @@ export function computeGutterWidth(rowCount: number): number {
 
 const HEADER_HEIGHT = ROW_HEIGHT;
 const MIN_ROW_HEIGHT = 18;
-const MIN_COL_WIDTH = 40;
-const DEFAULT_COL_WIDTH = 100;
+export const MIN_COL_WIDTH = 40;
+export const DEFAULT_COL_WIDTH = 100;
+export const MAX_AUTOFIT_COL_WIDTH = 800;
+export const CELL_HORIZONTAL_PADDING = 24;
 const COPY_CHUNK_ROWS = 5000;
+
+/**
+ * Returns the longest line in a potentially multiline text string.
+ */
+export function getLongestLine(text: string): string {
+  if (!text.includes("\n")) return text;
+  return text.split("\n").reduce((a, b) => (b.length > a.length ? b : a), "");
+}
+
+/**
+ * Measures text width using Canvas 2D when available, with a resilient fallback.
+ */
+export function measureTextWidth(text: string, font?: string): number {
+  if (!text) return 0;
+  if (typeof document !== "undefined") {
+    try {
+      const holder = measureTextWidth as unknown as { _canvas?: HTMLCanvasElement };
+      const canvas = holder._canvas || (holder._canvas = document.createElement("canvas"));
+      const context = canvas.getContext("2d");
+      if (context) {
+        if (font) context.font = font;
+        const metrics = context.measureText(text);
+        if (metrics && metrics.width > 0) {
+          return metrics.width;
+        }
+      }
+    } catch {
+      // Fall through to fallback
+    }
+  }
+
+  // Fallback: character-based estimate (e.g. in headless vitest)
+  let width = 0;
+  for (const char of text) {
+    const code = char.codePointAt(0) ?? 0;
+    if (
+      (code >= 0x4e00 && code <= 0x9fff) ||
+      (code >= 0x3400 && code <= 0x4dbf) ||
+      (code >= 0xff00 && code <= 0xffef)
+    ) {
+      width += 14;
+    } else {
+      width += 8;
+    }
+  }
+  return width;
+}
+
+/**
+ * Retrieves the effective font string from a container DOM element.
+ */
+export function getGridFont(container: HTMLElement | null): string {
+  if (typeof window === "undefined" || !container) {
+    return "13px Inter, Avenir, Helvetica, Arial, sans-serif";
+  }
+  const style = window.getComputedStyle(container);
+  const size = style.fontSize || "13px";
+  const family = style.fontFamily || "Inter, Avenir, Helvetica, Arial, sans-serif";
+  const weight = style.fontWeight || "400";
+  return `${weight} ${size} ${family}`;
+}
+
+/**
+ * Pure function: calculates the optimal width for a column based on its content,
+ * checking the header text, chrome column label, and all supplied rows.
+ * Clamped between minWidth (default 40px) and maxWidth (default 800px).
+ */
+export function computeAutoFitColWidth(
+  colIndex: number,
+  rows: Iterable<string[] | undefined>,
+  measureText: (text: string) => number,
+  headerText?: string,
+  minWidth: number = MIN_COL_WIDTH,
+  maxWidth: number = MAX_AUTOFIT_COL_WIDTH,
+  padding: number = CELL_HORIZONTAL_PADDING,
+): number {
+  let maxTextWidth = 0;
+
+  if (headerText) {
+    const line = getLongestLine(headerText);
+    maxTextWidth = Math.max(maxTextWidth, measureText(line));
+  }
+
+  const chromeLabel = String(colIndex + 1);
+  maxTextWidth = Math.max(maxTextWidth, measureText(chromeLabel));
+
+  for (const row of rows) {
+    if (row && colIndex < row.length) {
+      const val = row[colIndex];
+      if (val) {
+        const line = getLongestLine(val);
+        const w = measureText(line);
+        if (w > maxTextWidth) {
+          maxTextWidth = w;
+        }
+      }
+    }
+  }
+
+  const calculated = Math.ceil(maxTextWidth + padding);
+  return Math.min(maxWidth, Math.max(minWidth, calculated));
+}
 
 /**
  * Browser engines enforce a hard limit on DOM element dimensions (e.g. Chrome/WebKit ~33.55M px).
@@ -220,6 +324,8 @@ export interface GridHandle {
   scrollToCol: (col: number) => void;
   selectCell: (row: number, col: number) => void;
   invalidateCache: () => void;
+  autoFitCol?: (col: number) => void;
+  autoFitAllCols?: () => void;
 }
 
 interface CellPos {
@@ -325,12 +431,74 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
   const [colWidths, setColWidths] = useState<Record<number, number>>({});
   const selectingRef = useRef(false);
 
+  function autoFitCol(colIndex: number) {
+    const font = getGridFont(containerRef.current);
+    const measure = (text: string) => measureTextWidth(text, font);
+
+    // If the clicked column is part of a full-column selection spanning multiple columns,
+    // auto-fit all selected columns (Excel behavior)
+    let colsToFit = [colIndex];
+    if (
+      selStart &&
+      selEnd &&
+      Math.min(selStart.row, selEnd.row) === 0 &&
+      Math.max(selStart.row, selEnd.row) >= rowCount - 1 &&
+      colIndex >= Math.min(selStart.col, selEnd.col) &&
+      colIndex <= Math.max(selStart.col, selEnd.col)
+    ) {
+      const minCol = Math.min(selStart.col, selEnd.col);
+      const maxCol = Math.max(selStart.col, selEnd.col);
+      colsToFit = [];
+      for (let c = minCol; c <= maxCol; c++) {
+        colsToFit.push(c);
+      }
+    }
+
+    setColWidths((prev) => {
+      const next = { ...prev };
+      for (const c of colsToFit) {
+        next[c] = computeAutoFitColWidth(
+          c,
+          rowsByIndex.values(),
+          measure,
+          rowsByIndex.get(0)?.[c],
+        );
+      }
+      return next;
+    });
+  }
+
+  function autoFitAllCols() {
+    const font = getGridFont(containerRef.current);
+    const measure = (text: string) => measureTextWidth(text, font);
+    const count = rowsByIndex.get(0)?.length ?? 0;
+    setColWidths((prev) => {
+      const next = { ...prev };
+      for (let c = 0; c < count; c++) {
+        next[c] = computeAutoFitColWidth(
+          c,
+          rowsByIndex.values(),
+          measure,
+          rowsByIndex.get(0)?.[c],
+        );
+      }
+      return next;
+    });
+  }
+
   function startColResize(e: React.MouseEvent, colIndex: number) {
     e.preventDefault();
     e.stopPropagation();
+    if (e.detail === 2) {
+      autoFitCol(colIndex);
+      return;
+    }
     const startX = e.clientX;
     const startWidth = colWidths[colIndex] ?? DEFAULT_COL_WIDTH;
+    let hasMoved = false;
     function onMove(ev: MouseEvent) {
+      if (!hasMoved && Math.abs(ev.clientX - startX) < 2) return;
+      hasMoved = true;
       const next = Math.max(MIN_COL_WIDTH, startWidth + (ev.clientX - startX));
       setColWidths((prev) => ({ ...prev, [colIndex]: next }));
     }
@@ -464,6 +632,8 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
       scrollCellIntoView(row, col);
     },
     invalidateCache,
+    autoFitCol,
+    autoFitAllCols,
   }));
 
   useEffect(() => {
@@ -1081,7 +1251,12 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
               {c + 1}
               <div
                 onMouseDown={(e) => startColResize(e, c)}
-                style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 4, cursor: "col-resize" }}
+                onDoubleClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  autoFitCol(c);
+                }}
+                style={{ position: "absolute", right: -3, top: 0, bottom: 0, width: 6, cursor: "col-resize", zIndex: 2 }}
               />
             </div>
           ))}
@@ -1173,6 +1348,24 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
                   onOverflow={() => handleOverflow(0)}
                   onEditEnd={endEdit}
                   isModified={Boolean(filterActive && filterEdits?.has(`0,${ci}`))}
+                />
+                <div
+                  onMouseDown={(e) => startColResize(e, ci)}
+                  onDoubleClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    autoFitCol(ci);
+                  }}
+                  style={{
+                    position: "absolute",
+                    right: -3,
+                    top: 0,
+                    bottom: 0,
+                    width: 6,
+                    cursor: "col-resize",
+                    zIndex: 2,
+                    display: editingCell?.row === 0 && editingCell?.col === ci ? "none" : "block",
+                  }}
                 />
               </div>
             ))
@@ -1323,6 +1516,14 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
               <button onClick={() => insertCol(contextMenu.index)}>Insert column left</button>
               <button onClick={() => insertCol(contextMenu.index + 1)}>Insert column right</button>
               <button onClick={() => deleteCol(contextMenu.index)}>Delete column</button>
+              <button
+                onClick={() => {
+                  autoFitCol(contextMenu.index);
+                  setContextMenu(null);
+                }}
+              >
+                Auto-fit column width
+              </button>
               <button onClick={() => sortByCol(contextMenu.index)}>Sort by this column</button>
               <button onClick={clearSort}>Clear sort</button>
               {contextMenu.index < freezeCols ? (

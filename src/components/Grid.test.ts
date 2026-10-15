@@ -1,15 +1,22 @@
 import { describe, expect, it } from "vitest";
 import {
+  CELL_HORIZONTAL_PADDING,
   computeCellBackground,
   computeDomRowTop,
   computeGutterWidth,
   computeScrollMetrics,
   computeWindow,
+  DEFAULT_COL_WIDTH,
   fetchRowsInChunks,
+  getLongestLine,
+  MAX_AUTOFIT_COL_WIDTH,
   MAX_SCROLL_CONTAINER_HEIGHT,
+  measureTextWidth,
+  MIN_COL_WIDTH,
   MIN_GUTTER_WIDTH,
   physicalToVirtualScrollTop,
   virtualToPhysicalScrollTop,
+  computeAutoFitColWidth,
 } from "./Grid";
 
 describe("computeGutterWidth", () => {
@@ -325,4 +332,102 @@ describe("computeCellBackground", () => {
     );
   });
 });
+
+describe("getLongestLine", () => {
+  it("returns the original string if single-line", () => {
+    expect(getLongestLine("simple text")).toBe("simple text");
+  });
+
+  it("returns the longest line from a multiline string", () => {
+    const multi = "short\nthis is a longer line\ntiny";
+    expect(getLongestLine(multi)).toBe("this is a longer line");
+  });
+
+  it("handles empty strings", () => {
+    expect(getLongestLine("")).toBe("");
+  });
+});
+
+describe("measureTextWidth", () => {
+  it("returns 0 for empty string", () => {
+    expect(measureTextWidth("")).toBe(0);
+  });
+
+  it("estimates positive width for text", () => {
+    const w = measureTextWidth("sample");
+    expect(w).toBeGreaterThan(0);
+  });
+
+  it("gives wider width for longer text", () => {
+    expect(measureTextWidth("short")).toBeLessThan(measureTextWidth("much longer text string here"));
+  });
+});
+
+describe("computeAutoFitColWidth", () => {
+  const fakeMeasure = (text: string) => text.length * 8;
+
+  it("respects MIN_COL_WIDTH for empty or very short content", () => {
+    const rows = [[""], ["a"], ["b"]];
+    const width = computeAutoFitColWidth(0, rows, fakeMeasure, undefined);
+    expect(width).toBe(MIN_COL_WIDTH);
+  });
+
+  it("applies CELL_HORIZONTAL_PADDING when computing cell width", () => {
+    const rows = [["abc"]]; // 3 chars * 8 = 24
+    const width = computeAutoFitColWidth(0, rows, fakeMeasure);
+    expect(width).toBe(24 + CELL_HORIZONTAL_PADDING);
+  });
+
+  it("expands based on data cell contents", () => {
+    const rows = [
+      ["short", "val"],
+      ["medium length text", "val"],
+      ["this is a very long string that needs wide column", "val"],
+    ];
+    // Longest text is 49 chars -> 49 * 8 = 392 + 24 (padding) = 416
+    const width = computeAutoFitColWidth(0, rows, fakeMeasure);
+    expect(width).toBe(416);
+    expect(width).toBeGreaterThan(DEFAULT_COL_WIDTH);
+  });
+
+  it("takes header text into account", () => {
+    const rows = [["val1"], ["val2"]];
+    const header = "Super Long Column Title Name";
+    // Header is 28 chars -> 28 * 8 = 224 + 24 = 248
+    const width = computeAutoFitColWidth(0, rows, fakeMeasure, header);
+    expect(width).toBe(248);
+  });
+
+  it("takes chrome column number into account", () => {
+    const rows: string[][] = [];
+    // Column 999 -> chrome label "1000" -> 4 * 8 = 32 + 24 = 56
+    const width = computeAutoFitColWidth(999, rows, fakeMeasure);
+    expect(width).toBeGreaterThanOrEqual(MIN_COL_WIDTH);
+  });
+
+  it("caps column width at MAX_AUTOFIT_COL_WIDTH", () => {
+    const hugeText = "A".repeat(500);
+    const rows = [[hugeText]];
+    const width = computeAutoFitColWidth(0, rows, fakeMeasure);
+    expect(width).toBe(MAX_AUTOFIT_COL_WIDTH);
+  });
+
+  it("handles multiline cell values by sizing to the longest line", () => {
+    const multiline = "line1\nsuper long second line in this cell\nline3";
+    const rows = [[multiline]];
+    const width = computeAutoFitColWidth(0, rows, fakeMeasure);
+    // Longest line is "super long second line in this cell" (35 chars) -> 35 * 8 = 280 + 24 = 304
+    expect(width).toBe(304);
+  });
+
+  it("safely ignores ragged rows that are shorter than colIndex", () => {
+    const rows = [
+      ["only one col"],
+      ["col0", "col1", "col2 with long text"],
+    ];
+    const width = computeAutoFitColWidth(2, rows, fakeMeasure);
+    expect(width).toBeGreaterThan(MIN_COL_WIDTH);
+  });
+});
+
 

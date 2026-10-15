@@ -60,6 +60,33 @@ jobs:
           pnpm test
           pnpm run build
 
+      - name: Extract Release Notes from CHANGELOG.md
+        id: changelog
+        shell: bash
+        run: |
+          python3 -c "
+          import re, os
+          tag = os.environ.get('GITHUB_REF_NAME', '')
+          notes = ''
+          try:
+              with open('CHANGELOG.md', 'r') as f:
+                  content = f.read()
+              tag_escaped = re.escape(tag.lstrip('v'))
+              pattern = rf'(## \[[v]?{tag_escaped}\].*?)(?=\n## \[|\Z)'
+              match = re.search(pattern, content, re.DOTALL)
+              if match:
+                  notes = match.group(1).strip()
+          except Exception as e:
+              print(f'Error reading CHANGELOG.md: {e}')
+          if not notes:
+              notes = f'## Gigagrid {tag}\n\nNew features and performance improvements.'
+          
+          github_output = os.environ.get('GITHUB_OUTPUT')
+          if github_output:
+              with open(github_output, 'a') as out:
+                  out.write('notes<<EOF\n' + notes + '\nEOF\n')
+          "
+
       - name: Build Desktop App & Publish Release
         uses: tauri-apps/tauri-action@v0
         env:
@@ -69,16 +96,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Gigagrid ${{ github.ref_name }}'
-          releaseBody: |
-            ## Gigagrid ${{ github.ref_name }}
-            
-            ### Highlights
-            - ⚡ Instant GB-scale CSV/TSV viewing with byte-offset indexing.
-            - 🖱️ Drag-and-drop file opening with drop zone indicator.
-            - 📝 In-place inline cell editing with full undo/redo stack.
-            - 🔍 Full-text search and find & replace overlay.
-            - 📌 Column freeze, ragged row detection, and live delimiter/encoding switching.
-            - 📦 Native cross-platform packages (macOS Universal .dmg, Windows .msi/.exe, Linux .deb/.AppImage).
+          releaseBody: ${{ steps.changelog.outputs.notes }}
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}

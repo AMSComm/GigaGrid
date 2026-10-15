@@ -43,12 +43,32 @@ export async function checkForAppUpdates(): Promise<UpdateInfo> {
       const update = await check();
       cachedUpdate = update;
       if (update) {
+        let notes = update.body || "New features and performance improvements.";
+        // If the notes from latest.json is the generic "Highlights" template,
+        // fetch the detailed release notes from GitHub Releases API
+        if (!notes || notes.includes("### Highlights")) {
+          try {
+            const tag = update.version.startsWith("v") ? update.version : `v${update.version}`;
+            const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/tags/${tag}`, {
+              headers: { Accept: "application/vnd.github.v3+json" },
+            });
+            if (res.ok) {
+              const data = await res.json();
+              if (data.body) {
+                notes = data.body;
+              }
+            }
+          } catch {
+            // Keep default update.body fallback
+          }
+        }
+
         return {
           available: true,
           currentVersion: CURRENT_VERSION,
           latestVersion: update.version,
           releaseDate: update.date,
-          notes: update.body || "New features and performance improvements.",
+          notes,
           isTauri: true,
           hasNativeUpdater: true,
         };

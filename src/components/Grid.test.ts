@@ -17,6 +17,7 @@ import {
   physicalToVirtualScrollTop,
   virtualToPhysicalScrollTop,
   computeAutoFitColWidth,
+  computeHeaderCellHighlight,
 } from "./Grid";
 
 describe("computeGutterWidth", () => {
@@ -330,6 +331,31 @@ describe("computeCellBackground", () => {
     expect(computeCellBackground(true, true)).toBe(
       "linear-gradient(rgba(70,130,255,0.25), rgba(70,130,255,0.25)) var(--bg)",
     );
+  });
+});
+
+describe("computeHeaderCellHighlight", () => {
+  it("returns empty object when unselected", () => {
+    expect(computeHeaderCellHighlight(false)).toEqual({});
+    expect(computeHeaderCellHighlight(false, "var(--bg)")).toEqual({});
+  });
+
+  it("returns background, color, and fontWeight when selected with default base background", () => {
+    expect(computeHeaderCellHighlight(true)).toEqual({
+      background:
+        "linear-gradient(var(--header-highlight-bg, rgba(57, 108, 216, 0.18)), var(--header-highlight-bg, rgba(57, 108, 216, 0.18))) var(--header-bg)",
+      color: "var(--header-highlight-fg, var(--primary, #396cd8))",
+      fontWeight: 600,
+    });
+  });
+
+  it("supports custom base background for frozen columns", () => {
+    expect(computeHeaderCellHighlight(true, "var(--bg)")).toEqual({
+      background:
+        "linear-gradient(var(--header-highlight-bg, rgba(57, 108, 216, 0.18)), var(--header-highlight-bg, rgba(57, 108, 216, 0.18))) var(--bg)",
+      color: "var(--header-highlight-fg, var(--primary, #396cd8))",
+      fontWeight: 600,
+    });
   });
 });
 

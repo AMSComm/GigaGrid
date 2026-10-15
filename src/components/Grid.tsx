@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type CSSProperties } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Cell } from "./Cell";
 import type { GridStats } from "./StatusBar";
@@ -237,6 +237,24 @@ export function computeCellBackground(isSel: boolean, isFrozenCol: boolean): str
       : "var(--bg)";
   }
   return isSel ? "rgba(70,130,255,0.25)" : undefined;
+}
+
+/**
+ * Computes background, font color, and font weight styling for header cells
+ * (row number gutters and chrome column number cells) when selected.
+ * Layering the semi-transparent highlight over baseBg prevents underlying
+ * virtualized data from bleeding through during scroll.
+ */
+export function computeHeaderCellHighlight(
+  isSel: boolean,
+  baseBg: string = "var(--header-bg)",
+): { background?: string; color?: string; fontWeight?: CSSProperties["fontWeight"] } {
+  if (!isSel) return {};
+  return {
+    background: `linear-gradient(var(--header-highlight-bg, rgba(57, 108, 216, 0.18)), var(--header-highlight-bg, rgba(57, 108, 216, 0.18))) ${baseBg}`,
+    color: "var(--header-highlight-fg, var(--primary, #396cd8))",
+    fontWeight: 600,
+  };
 }
 
 export interface VisibleRange {
@@ -1177,6 +1195,11 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
     return left;
   }
 
+  const bounds = selectionBounds();
+  const isRow0Sel = Boolean(bounds && 0 >= bounds.rowMin && 0 <= bounds.rowMax);
+  const row0Highlight = computeHeaderCellHighlight(isRow0Sel, "var(--header-bg)");
+  const malformedRow0 = frozenRow !== undefined && colCount > 0 && frozenRow.length !== colCount;
+
   return (
     <div
       ref={containerRef}
@@ -1212,54 +1235,64 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
               ...chromeBorder,
             }}
           />
-          {Array.from({ length: colCount }, (_, c) => (
-            <div
-              key={c}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                if (e.shiftKey && selStart) {
-                  setSelEnd({ row: rowCount - 1, col: c });
-                } else {
-                  setSelStart({ row: 0, col: c });
-                  setSelEnd({ row: rowCount - 1, col: c });
-                }
-                containerRef.current?.focus();
-              }}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                setContextMenu({ x: e.clientX, y: e.clientY, kind: "col", index: c });
-              }}
-              style={{
-                position: "relative",
-                flexShrink: 0,
-                width: colWidths[c] ?? DEFAULT_COL_WIDTH,
-                height: HEADER_HEIGHT,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                cursor: "pointer",
-                ...chromeBorder,
-                ...(c < freezeCols ? {
-                  position: "sticky" as const,
-                  left: frozenLeft(c),
-                  zIndex: 1,
-                  background: "var(--bg)",
-                  ...(c === freezeCols - 1 ? { borderRight: "2px solid var(--border)" } : {}),
-                } : {}),
-              }}
-            >
-              {c + 1}
+          {Array.from({ length: colCount }, (_, c) => {
+            const isColSel = Boolean(bounds && c >= bounds.colMin && c <= bounds.colMax);
+            const baseBg = c < freezeCols ? "var(--bg)" : "var(--header-bg)";
+            const highlight = computeHeaderCellHighlight(isColSel, baseBg);
+            return (
               <div
-                onMouseDown={(e) => startColResize(e, c)}
-                onDoubleClick={(e) => {
+                key={c}
+                onMouseDown={(e) => {
                   e.preventDefault();
-                  e.stopPropagation();
-                  autoFitCol(c);
+                  if (e.shiftKey && selStart) {
+                    setSelEnd({ row: rowCount - 1, col: c });
+                  } else {
+                    setSelStart({ row: 0, col: c });
+                    setSelEnd({ row: rowCount - 1, col: c });
+                  }
+                  containerRef.current?.focus();
                 }}
-                style={{ position: "absolute", right: -3, top: 0, bottom: 0, width: 6, cursor: "col-resize", zIndex: 2 }}
-              />
-            </div>
-          ))}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setContextMenu({ x: e.clientX, y: e.clientY, kind: "col", index: c });
+                }}
+                style={{
+                  position: "relative",
+                  flexShrink: 0,
+                  width: colWidths[c] ?? DEFAULT_COL_WIDTH,
+                  height: HEADER_HEIGHT,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                  background: highlight.background,
+                  color: highlight.color,
+                  fontWeight: highlight.fontWeight,
+                  ...chromeBorder,
+                  ...(c < freezeCols
+                    ? {
+                        position: "sticky" as const,
+                        left: frozenLeft(c),
+                        zIndex: 1,
+                        background: highlight.background ?? "var(--bg)",
+                        ...(c === freezeCols - 1 ? { borderRight: "2px solid var(--border)" } : {}),
+                      }
+                    : {}),
+                }}
+              >
+                {c + 1}
+                <div
+                  onMouseDown={(e) => startColResize(e, c)}
+                  onDoubleClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    autoFitCol(c);
+                  }}
+                  style={{ position: "absolute", right: -3, top: 0, bottom: 0, width: 6, cursor: "col-resize", zIndex: 2 }}
+                />
+              </div>
+            );
+          })}
         </div>
       )}
       {freezeHeader && rowCount > 0 && (
@@ -1290,6 +1323,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
                 e.preventDefault();
                 setContextMenu({ x: e.clientX, y: e.clientY, kind: "row", index: 0 });
               }}
+              title={malformedRow0 ? `Expected ${colCount} columns, got ${frozenRow!.length}` : undefined}
               style={{
                 position: "sticky",
                 left: 0,
@@ -1299,7 +1333,9 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
                 minWidth: gutterWidth,
                 maxWidth: gutterWidth,
                 boxSizing: "border-box",
-                background: "var(--header-bg)",
+                background: row0Highlight.background ?? "var(--header-bg)",
+                color: malformedRow0 ? "#e08800" : row0Highlight.color,
+                fontWeight: row0Highlight.fontWeight,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -1381,6 +1417,8 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
           const row = rowsByIndex.get(rowIndex);
           const malformed = row !== undefined && colCount > 0 && row.length !== colCount;
           const domRowTop = computeDomRowTop(offset, rowHeight, scrollTop, virtualScrollTop, metrics.isScaled);
+          const isRowSel = Boolean(bounds && rowIndex >= bounds.rowMin && rowIndex <= bounds.rowMax);
+          const rowHighlight = computeHeaderCellHighlight(isRowSel, "var(--header-bg)");
           return (
             <div
               key={rowIndex}
@@ -1423,12 +1461,13 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
                     overflow: "hidden",
                     whiteSpace: "nowrap",
                     textOverflow: "ellipsis",
-                    background: "var(--header-bg)",
+                    background: rowHighlight.background ?? "var(--header-bg)",
+                    color: malformed ? "#e08800" : rowHighlight.color,
+                    fontWeight: rowHighlight.fontWeight,
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
                     cursor: "pointer",
-                    color: malformed ? "#e08800" : undefined,
                     ...chromeBorder,
                   }}
                 >

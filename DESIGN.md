@@ -8,6 +8,8 @@ colors:
   border: "#dddddd"
   input-bg: "#ffffff"
   header-bg: "#e8e8e8"
+  header-highlight-bg: "rgba(57, 108, 216, 0.18)"
+  header-highlight-fg: "#2050b5"
   primary: "#396cd8"
   primary-hover: "#2c57b3"
   danger: "#d93025"
@@ -17,6 +19,8 @@ colors:
   dark-border: "#444444"
   dark-input-bg: "#161616"
   dark-header-bg: "#3d3d3d"
+  dark-header-highlight-bg: "rgba(70, 130, 255, 0.25)"
+  dark-header-highlight-fg: "#7aa7ff"
 typography:
   body:
     fontFamily: "Inter, Avenir, Helvetica, Arial, sans-serif"

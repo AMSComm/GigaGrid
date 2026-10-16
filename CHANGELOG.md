@@ -2,6 +2,25 @@
 
 All notable changes to **Gigagrid** will be documented in this file.
 
+## [v0.5.6] - 2026-10-16
+
+### 🚀 Features & Enhancements
+- **Reload from Disk**:
+  - Added dedicated "Reload from disk" button with spinning reload indicator in the toolbar File operations group.
+  - Global `Cmd+R` / `Ctrl+R` and `F5` shortcuts to reload the active tab from disk, intercepting browser webview reload so open tabs are never lost.
+  - Added native menu item `File -> Reload from Disk` (`CmdOrCtrl+R`).
+  - Safe discard protection: Prompts with confirmation dialog if the active file has unsaved edits before reloading.
+  - Complete state reset: Re-indexes file from disk, updates row count and canonical column count, clears in-memory edit overlay, resets active view/sort/filter states, and refreshes the grid cache immediately.
+  - Refined toolbar UX: "Re-apply filter" button now only displays when filtering is active (`filterActive`), eliminating UI confusion with reload.
+- **Active Selection Header Highlighting**:
+  - Added visual highlight indicators on row number gutters and column header labels matching the active cell selection range.
+  - Fully integrated with sticky frozen headers and frozen first column in both light and dark themes.
+- **Global Grid Select All**:
+  - Global `Cmd+A` / `Ctrl+A` cell range selection across all table cells while properly preserving standard native text selection inside active text inputs, textareas, and cell editors.
+  - Suppressed accidental browser text selection across gutter numbers and column headers (`user-select: none`).
+
+---
+
 ## [v0.5.5] - 2026-10-15
 
 ### 🚀 Features & Enhancements

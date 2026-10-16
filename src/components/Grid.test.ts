@@ -17,6 +17,9 @@ import {
   physicalToVirtualScrollTop,
   virtualToPhysicalScrollTop,
   computeAutoFitColWidth,
+  computeAutoFitAllColWidths,
+  getMaxColCount,
+  INITIAL_AUTOFIT_SAMPLE_ROWS,
   computeHeaderCellHighlight,
   computeSelectAllBounds,
 } from "./Grid";
@@ -482,5 +485,66 @@ describe("computeAutoFitColWidth", () => {
     expect(width).toBeGreaterThan(MIN_COL_WIDTH);
   });
 });
+
+describe("getMaxColCount", () => {
+  it("returns 0 for empty rows", () => {
+    expect(getMaxColCount([])).toBe(0);
+  });
+
+  it("returns maximum length across ragged rows", () => {
+    const rows = [
+      ["a", "b"],
+      ["1", "2", "3", "4", "5"],
+      ["x"],
+    ];
+    expect(getMaxColCount(rows)).toBe(5);
+  });
+
+  it("handles rows with undefined elements", () => {
+    const rows = [undefined, ["a", "b"], undefined];
+    expect(getMaxColCount(rows)).toBe(2);
+  });
+});
+
+describe("computeAutoFitAllColWidths", () => {
+  const fakeMeasure = (text: string) => text.length * 8;
+
+  it("returns empty record for 0 columns", () => {
+    expect(computeAutoFitAllColWidths([], 0, fakeMeasure)).toEqual({});
+  });
+
+  it("computes fitted widths for multiple columns including headers and data", () => {
+    const header = ["ID", "Full Name", "Description"];
+    const rows = [
+      ["1", "Alice", "Short text"],
+      ["2", "Bob Alexander Smith", "A very long detailed description in this cell"],
+    ];
+    const widths = computeAutoFitAllColWidths(rows, 3, fakeMeasure, header);
+
+    // ID: header "ID" (16), data "2" (8), chrome "1" (8) -> max 16 + 24 = 40 (MIN_COL_WIDTH)
+    expect(widths[0]).toBe(MIN_COL_WIDTH);
+
+    // Full Name: data "Bob Alexander Smith" (19 chars * 8 = 152 + 24 = 176)
+    expect(widths[1]).toBe(176);
+
+    // Description: data is 45 chars * 8 = 360 + 24 = 384
+    expect(widths[2]).toBe(384);
+
+    expect(widths[1]).toBeGreaterThan(widths[0]);
+    expect(widths[2]).toBeGreaterThan(widths[1]);
+  });
+
+  it("respects MAX_AUTOFIT_COL_WIDTH across all columns", () => {
+    const rows = [["X".repeat(400), "Y".repeat(500)]];
+    const widths = computeAutoFitAllColWidths(rows, 2, fakeMeasure);
+    expect(widths[0]).toBe(MAX_AUTOFIT_COL_WIDTH);
+    expect(widths[1]).toBe(MAX_AUTOFIT_COL_WIDTH);
+  });
+
+  it("samples up to INITIAL_AUTOFIT_SAMPLE_ROWS", () => {
+    expect(INITIAL_AUTOFIT_SAMPLE_ROWS).toBe(100);
+  });
+});
+
 
 

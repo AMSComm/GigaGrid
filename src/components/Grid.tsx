@@ -27,6 +27,7 @@ export const MIN_COL_WIDTH = 40;
 export const DEFAULT_COL_WIDTH = 100;
 export const MAX_AUTOFIT_COL_WIDTH = 800;
 export const CELL_HORIZONTAL_PADDING = 24;
+export const INITIAL_AUTOFIT_SAMPLE_ROWS = 100;
 const COPY_CHUNK_ROWS = 5000;
 
 /**
@@ -129,6 +130,47 @@ export function computeAutoFitColWidth(
 
   const calculated = Math.ceil(maxTextWidth + padding);
   return Math.min(maxWidth, Math.max(minWidth, calculated));
+}
+
+/**
+ * Scans rows to determine the maximum column count across all sampled rows.
+ */
+export function getMaxColCount(rows: Iterable<string[] | undefined>): number {
+  let maxCols = 0;
+  for (const row of rows) {
+    if (row && row.length > maxCols) {
+      maxCols = row.length;
+    }
+  }
+  return maxCols;
+}
+
+/**
+ * Pure function: calculates the optimal width for all columns based on content and headers.
+ * Returns a mapping of column index to optimal width.
+ */
+export function computeAutoFitAllColWidths(
+  rows: Iterable<string[] | undefined>,
+  colCount: number,
+  measureText: (text: string) => number,
+  headerRow?: string[],
+  minWidth: number = MIN_COL_WIDTH,
+  maxWidth: number = MAX_AUTOFIT_COL_WIDTH,
+  padding: number = CELL_HORIZONTAL_PADDING,
+): Record<number, number> {
+  const result: Record<number, number> = {};
+  for (let c = 0; c < colCount; c++) {
+    result[c] = computeAutoFitColWidth(
+      c,
+      rows,
+      measureText,
+      headerRow?.[c],
+      minWidth,
+      maxWidth,
+      padding,
+    );
+  }
+  return result;
 }
 
 /**
@@ -464,6 +506,13 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
   };
   const [colWidths, setColWidths] = useState<Record<number, number>>({});
   const selectingRef = useRef(false);
+  const hasAutoFittedRef = useRef(false);
+
+  useEffect(() => {
+    hasAutoFittedRef.current = false;
+    setColWidths({});
+    setRowsByIndex(new Map());
+  }, [tabId]);
 
   function autoFitCol(colIndex: number) {
     const font = getGridFont(containerRef.current);
@@ -505,19 +554,16 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
   function autoFitAllCols() {
     const font = getGridFont(containerRef.current);
     const measure = (text: string) => measureTextWidth(text, font);
-    const count = rowsByIndex.get(0)?.length ?? 0;
-    setColWidths((prev) => {
-      const next = { ...prev };
-      for (let c = 0; c < count; c++) {
-        next[c] = computeAutoFitColWidth(
-          c,
-          rowsByIndex.values(),
-          measure,
-          rowsByIndex.get(0)?.[c],
-        );
-      }
-      return next;
-    });
+    const count = Math.max(getEffectiveColCount(), getMaxColCount(rowsByIndex.values()));
+    setColWidths((prev) => ({
+      ...prev,
+      ...computeAutoFitAllColWidths(
+        rowsByIndex.values(),
+        count,
+        measure,
+        rowsByIndex.get(0),
+      ),
+    }));
   }
 
   function startColResize(e: React.MouseEvent, colIndex: number) {
@@ -729,6 +775,14 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
             rows.forEach((row, i) => next.set(actualStart + i, row));
             return next;
           });
+          if (!hasAutoFittedRef.current && actualStart === 0 && rows.length > 0) {
+            hasAutoFittedRef.current = true;
+            const font = getGridFont(containerRef.current);
+            const measure = (text: string) => measureTextWidth(text, font);
+            const colCount = Math.max(rows[0]?.length ?? 0, getMaxColCount(rows));
+            const autoWidths = computeAutoFitAllColWidths(rows, colCount, measure, rows[0]);
+            setColWidths((prev) => ({ ...autoWidths, ...prev }));
+          }
           onError?.(null);
         })
         .catch((err) => {
@@ -742,10 +796,23 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
   useEffect(() => {
     if (rowCount === 0) return;
     if (rowsByIndex.has(0)) return;
-    invoke<string[][]>("get_rows", { tabId, start: 0, count: 1 })
+    const sampleCount = hasAutoFittedRef.current ? 1 : Math.min(rowCount, INITIAL_AUTOFIT_SAMPLE_ROWS);
+    invoke<string[][]>("get_rows", { tabId, start: 0, count: sampleCount })
       .then((rows) => {
-        if (!rows[0]) return;
-        setRowsByIndex((prev) => new Map(prev).set(0, rows[0]));
+        if (!rows || rows.length === 0) return;
+        setRowsByIndex((prev) => {
+          const next = new Map(prev);
+          rows.forEach((row, i) => next.set(i, row));
+          return next;
+        });
+        if (!hasAutoFittedRef.current) {
+          hasAutoFittedRef.current = true;
+          const font = getGridFont(containerRef.current);
+          const measure = (text: string) => measureTextWidth(text, font);
+          const colCount = Math.max(rows[0]?.length ?? 0, getMaxColCount(rows));
+          const autoWidths = computeAutoFitAllColWidths(rows, colCount, measure, rows[0]);
+          setColWidths((prev) => ({ ...autoWidths, ...prev }));
+        }
         onError?.(null);
       })
       .catch((err) => {
@@ -1260,7 +1327,12 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
               e.preventDefault();
               selectAll();
             }}
-            title="Select all"
+            onDoubleClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              autoFitAllCols();
+            }}
+            title="Select all (Double-click to auto-fit all columns)"
             style={{
               position: "sticky",
               left: 0,
@@ -1603,6 +1675,14 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
                 }}
               >
                 Auto-fit column width
+              </button>
+              <button
+                onClick={() => {
+                  autoFitAllCols();
+                  setContextMenu(null);
+                }}
+              >
+                Auto-fit all columns
               </button>
               <button onClick={() => sortByCol(contextMenu.index)}>Sort by this column</button>
               <button onClick={clearSort}>Clear sort</button>

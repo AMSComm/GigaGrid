@@ -337,18 +337,34 @@ interface ContextMenuState {
   index: number;
 }
 
+export interface CellPos {
+  row: number;
+  col: number;
+}
+
 export interface GridHandle {
   scrollToRow: (row: number) => void;
   scrollToCol: (col: number) => void;
   selectCell: (row: number, col: number) => void;
+  selectAll: () => void;
   invalidateCache: () => void;
   autoFitCol?: (col: number) => void;
   autoFitAllCols?: () => void;
 }
 
-interface CellPos {
-  row: number;
-  col: number;
+/**
+ * Computes 0-based cell coordinates covering all rows and columns in the sheet.
+ * Returns null if the sheet has no rows or columns.
+ */
+export function computeSelectAllBounds(
+  rowCount: number,
+  colCount: number,
+): { start: CellPos; end: CellPos } | null {
+  if (rowCount <= 0 || colCount <= 0) return null;
+  return {
+    start: { row: 0, col: 0 },
+    end: { row: rowCount - 1, col: colCount - 1 },
+  };
 }
 
 export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
@@ -629,6 +645,24 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
     }
   }
 
+  function getEffectiveColCount(): number {
+    const r0 = rowsByIndex.get(0);
+    if (r0) return r0.length;
+    for (const row of rowsByIndex.values()) {
+      if (row && row.length > 0) return row.length;
+    }
+    return 0;
+  }
+
+  function selectAll() {
+    const colCount = getEffectiveColCount();
+    const b = computeSelectAllBounds(rowCount, colCount);
+    if (!b) return;
+    setSelStart(b.start);
+    setSelEnd(b.end);
+    containerRef.current?.focus();
+  }
+
   useImperativeHandle(ref, () => ({
     scrollToRow: (row: number) => {
       const el = containerRef.current;
@@ -649,6 +683,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
       setSelEnd({ row, col });
       scrollCellIntoView(row, col);
     },
+    selectAll,
     invalidateCache,
     autoFitCol,
     autoFitAllCols,
@@ -1173,10 +1208,10 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
       invalidateCache();
       onRowCountChange?.(newRowCount);
       clampSelectionToRowCount(newRowCount);
-    } else if (e.key === "a") {
+    } else if (e.key.toLowerCase() === "a") {
       e.preventDefault();
-      setSelStart({ row: 0, col: 0 });
-      setSelEnd({ row: rowCount - 1, col: Math.max(0, colCount - 1) });
+      selectAll();
+      window.getSelection()?.removeAllRanges();
     }
   }
 
@@ -1221,6 +1256,11 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
           }}
         >
           <div
+            onMouseDown={(e) => {
+              e.preventDefault();
+              selectAll();
+            }}
+            title="Select all"
             style={{
               position: "sticky",
               left: 0,
@@ -1232,6 +1272,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
               boxSizing: "border-box",
               height: HEADER_HEIGHT,
               background: "var(--header-bg)",
+              cursor: "pointer",
               ...chromeBorder,
             }}
           />

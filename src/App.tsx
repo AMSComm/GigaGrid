@@ -294,6 +294,22 @@ function App() {
         return;
       }
 
+      // Select all cells: Cmd+A / Ctrl+A
+      if (mod && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "a") {
+        if (isEditingText()) {
+          // Allow native select-all in input/textarea/contenteditable
+          return;
+        }
+        e.preventDefault();
+        window.getSelection()?.removeAllRanges();
+        if (showUpdateDialog) return;
+        const currentActive = activeTabIdRef.current;
+        if (currentActive !== null) {
+          gridRefs.current.get(currentActive)?.selectAll();
+        }
+        return;
+      }
+
       if (activeTabId === null) return;
 
       // Save active tab: Cmd+S / Ctrl+S
@@ -421,7 +437,7 @@ function App() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activeTabId, tabs, showSearch, showFilter, showGoto, showRecent]);
+  }, [activeTabId, tabs, showSearch, showFilter, showGoto, showRecent, showUpdateDialog]);
 
   function updateSettings(patch: Partial<Settings>) {
     setSettings((prev) => {

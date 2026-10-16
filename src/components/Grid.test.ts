@@ -18,6 +18,7 @@ import {
   virtualToPhysicalScrollTop,
   computeAutoFitColWidth,
   computeHeaderCellHighlight,
+  computeSelectAllBounds,
 } from "./Grid";
 
 describe("computeGutterWidth", () => {
@@ -355,6 +356,32 @@ describe("computeHeaderCellHighlight", () => {
         "linear-gradient(var(--header-highlight-bg, rgba(57, 108, 216, 0.18)), var(--header-highlight-bg, rgba(57, 108, 216, 0.18))) var(--bg)",
       color: "var(--header-highlight-fg, var(--primary, #396cd8))",
       fontWeight: 600,
+    });
+  });
+});
+
+describe("computeSelectAllBounds", () => {
+  it("returns null for non-positive row count or column count", () => {
+    expect(computeSelectAllBounds(0, 5)).toBeNull();
+    expect(computeSelectAllBounds(10, 0)).toBeNull();
+    expect(computeSelectAllBounds(-1, 5)).toBeNull();
+    expect(computeSelectAllBounds(10, -2)).toBeNull();
+  });
+
+  it("computes bounds covering the entire grid (0 to rowCount - 1, 0 to colCount - 1)", () => {
+    expect(computeSelectAllBounds(1, 1)).toEqual({
+      start: { row: 0, col: 0 },
+      end: { row: 0, col: 0 },
+    });
+
+    expect(computeSelectAllBounds(100, 10)).toEqual({
+      start: { row: 0, col: 0 },
+      end: { row: 99, col: 9 },
+    });
+
+    expect(computeSelectAllBounds(1000000, 26)).toEqual({
+      start: { row: 0, col: 0 },
+      end: { row: 999999, col: 25 },
     });
   });
 });

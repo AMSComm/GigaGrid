@@ -32,6 +32,16 @@ body {
   overflow: hidden;
   color: var(--fg);
   background-color: var(--bg);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+input,
+textarea,
+.selectable-text,
+[data-selectable="true"] {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 @media (prefers-color-scheme: dark) {

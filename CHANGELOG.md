@@ -2,6 +2,18 @@
 
 All notable changes to **Gigagrid** will be documented in this file.
 
+## [v0.5.7] - 2026-10-16
+
+### 🚀 Features & Enhancements
+- **Auto-Fit Column Widths on File Open**:
+  - Automatically calculates and adjusts all column widths to fit content and headers immediately upon opening a file or tab.
+  - Dynamically measures text metrics across sampled rows (`INITIAL_AUTOFIT_SAMPLE_ROWS = 100`) and headers using Canvas 2D font metrics, with horizontal cell padding (`CELL_HORIZONTAL_PADDING = 24px`) clamped between `MIN_COL_WIDTH = 40px` and `MAX_AUTOFIT_COL_WIDTH = 800px`.
+  - Non-intrusive: Performs initial auto-fit once per tab/file open without overwriting manual column resizes or interfering during scrolling/editing.
+  - **Select All Header Double-Click**: Double-clicking the top-left select-all corner header cell now automatically recalculates and auto-fits all columns across the grid (standard spreadsheet behavior).
+  - **Context Menu Action**: Added "Auto-fit all columns" action to the column header right-click context menu.
+
+---
+
 ## [v0.5.6] - 2026-10-16
 
 ### 🚀 Features & Enhancements

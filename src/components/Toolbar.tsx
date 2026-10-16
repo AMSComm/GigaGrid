@@ -447,28 +447,30 @@ export function Toolbar({
         )}
       </div>
 
-      <button
-        type="button"
-        className="icon-btn"
-        data-action="reapply-filter"
-        disabled={!filterActive || !hasFilterEdits || isFiltering}
-        style={{
-          opacity: filterActive && hasFilterEdits && !isFiltering ? 1 : 0.4,
-          cursor: filterActive && hasFilterEdits && !isFiltering ? "pointer" : "not-allowed",
-          color: filterActive && hasFilterEdits && !isFiltering ? "var(--primary, #396cd8)" : undefined,
-        }}
-        title={
-          isFiltering
-            ? "Applying filter…"
-            : filterActive && hasFilterEdits
-            ? `Re-apply filter (${getToolbarShortcutLabel("reapplyFilter")})`
-            : "Re-apply filter (no modified cells)"
-        }
-        aria-label={`Re-apply filter (${getToolbarShortcutLabel("reapplyFilter")})`}
-        onClick={reapplyFilters}
-      >
-        <IconRefresh />
-      </button>
+      {filterActive && (
+        <button
+          type="button"
+          className="icon-btn"
+          data-action="reapply-filter"
+          disabled={!hasFilterEdits || isFiltering}
+          style={{
+            opacity: hasFilterEdits && !isFiltering ? 1 : 0.4,
+            cursor: hasFilterEdits && !isFiltering ? "pointer" : "not-allowed",
+            color: hasFilterEdits && !isFiltering ? "var(--primary, #396cd8)" : undefined,
+          }}
+          title={
+            isFiltering
+              ? "Applying filter…"
+              : hasFilterEdits
+              ? `Re-apply filter (${getToolbarShortcutLabel("reapplyFilter")})`
+              : "Re-apply filter (no modified cells)"
+          }
+          aria-label={`Re-apply filter (${getToolbarShortcutLabel("reapplyFilter")})`}
+          onClick={reapplyFilters}
+        >
+          <IconRefresh className={isFiltering ? "spin-icon" : undefined} />
+        </button>
+      )}
 
       <div style={{ position: "relative" }} className="goto-popover-anchor">
         <button

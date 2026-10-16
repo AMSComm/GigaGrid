@@ -26,6 +26,10 @@ fn create_app_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Resul
         .accelerator("CmdOrCtrl+S")
         .build(app)?;
 
+    let reload_file_item = tauri::menu::MenuItemBuilder::with_id("reload-file", "Reload from Disk")
+        .accelerator("CmdOrCtrl+R")
+        .build(app)?;
+
     let close_tab_item = tauri::menu::MenuItemBuilder::with_id("close-tab", "Close Tab")
         .accelerator("CmdOrCtrl+W")
         .build(app)?;
@@ -65,6 +69,7 @@ fn create_app_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Resul
         &[
             &open_file_item,
             &save_file_item,
+            &reload_file_item,
             &tauri::menu::PredefinedMenuItem::separator(app)?,
             &close_tab_item,
             &close_window_item,
@@ -157,6 +162,8 @@ pub fn run() {
                 let _ = app.emit("open-file-dialog", ());
             } else if event.id() == "save-file" {
                 let _ = app.emit("save-active-file", ());
+            } else if event.id() == "reload-file" {
+                let _ = app.emit("reload-active-file", ());
             } else if event.id() == "close-tab" {
                 let _ = app.emit("close-active-tab", ());
             } else if event.id() == "close-window" {
@@ -190,6 +197,7 @@ pub fn run() {
             commands::insert_col,
             commands::delete_col,
             commands::save_file,
+            commands::reload_file,
             commands::close_tab,
             commands::take_pending_open,
             commands::set_encoding,

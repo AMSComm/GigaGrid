@@ -493,6 +493,48 @@ pub fn save_file(dst: Option<String>, tab_id: TabId, state: State<AppState>) -> 
     Ok(())
 }
 
+pub fn reload_file_impl(open_file: &mut OpenFile) -> Result<FileMeta, String> {
+    let p = open_file.path.clone();
+    let delimiter = open_file.index.save_delimiter();
+    let encoding = open_file.index.encoding();
+    let freeze_header = open_file.freeze_header;
+
+    let new_index = CsvIndex::build_with_options(&p, Some(delimiter), Some(encoding))
+        .map_err(|e| e.to_string())?;
+    let row_count = new_index.row_count();
+    let format = new_index.format_label().to_string();
+    let encoding_label = new_index.encoding_label().to_string();
+    let line_ending = new_index.line_ending_label().to_string();
+    let col_count = if row_count > 0 {
+        let mut probe_file = File::open(&p).map_err(|e| e.to_string())?;
+        new_index.read_row(&mut probe_file, 0).map_err(|e| e.to_string())?.len()
+    } else {
+        0
+    };
+
+    open_file.index = new_index;
+    open_file.overlay = Overlay::new(row_count, col_count);
+    open_file.view = None;
+    open_file.sort_col = None;
+    open_file.filters.clear();
+    open_file.freeze_header = freeze_header;
+
+    let path = p.to_string_lossy().to_string();
+    Ok(FileMeta { tab_id: 0, path, row_count, format, encoding: encoding_label, line_ending })
+}
+
+/// Reloads the active file directly from disk, discarding local in-memory
+/// edits, views, and cached rows, while preserving current delimiter,
+/// encoding, and freeze_header settings.
+#[tauri::command]
+pub fn reload_file(tab_id: TabId, state: State<AppState>) -> Result<FileMeta, String> {
+    let mut guard = state.lock().map_err(|e| e.to_string())?;
+    let open_file = guard.files.get_mut(&tab_id).ok_or_else(|| "tab not found".to_string())?;
+    let mut meta = reload_file_impl(open_file)?;
+    meta.tab_id = tab_id;
+    Ok(meta)
+}
+
 #[tauri::command]
 pub fn set_encoding(
     tab_id: TabId,
@@ -1051,6 +1093,44 @@ mod tests {
         assert_eq!(open_file.overlay.get(2, 1), Some(&"NEW_C".to_string()));
         assert_eq!(open_file.overlay.get(1, 1), Some(&"NEW_B".to_string()));
         assert_eq!(open_file.overlay.get(0, 1), None);
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn reload_file_impl_refreshes_from_disk_and_clears_overlay_edits() {
+        let path = write_temp("reload_test", "original_1,a\noriginal_2,b\n");
+        let index = CsvIndex::build(&path).unwrap();
+        let mut open_file = OpenFile {
+            path: path.clone(),
+            index,
+            overlay: Overlay::new(2, 2),
+            view: None,
+            sort_col: None,
+            filters: Vec::new(),
+            freeze_header: true,
+        };
+
+        // Edit row 0 in memory
+        set_cell_impl(&mut open_file, 0, 0, "EDITED".to_string());
+        assert_eq!(open_file.overlay.get(0, 0), Some(&"EDITED".to_string()));
+
+        // Externally modify file on disk: add a 3rd row and change 1st row
+        std::fs::write(&path, "disk_1,a\ndisk_2,b\ndisk_3,c\n").unwrap();
+
+        // Reload from disk
+        let meta = reload_file_impl(&mut open_file).unwrap();
+        assert_eq!(meta.row_count, 3);
+        assert_eq!(open_file.index.row_count(), 3);
+
+        // In-memory edit overlay must be wiped clean
+        assert_eq!(open_file.overlay.get(0, 0), None);
+
+        // Fresh data read from disk
+        let rows = get_rows_impl(&open_file, 0, 3).unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0][0], "disk_1");
+        assert_eq!(rows[2][0], "disk_3");
 
         std::fs::remove_file(&path).ok();
     }

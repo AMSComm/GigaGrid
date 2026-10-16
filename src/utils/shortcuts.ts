@@ -29,6 +29,7 @@ export function formatShortcut(spec: ShortcutSpec, isMacPlatform = isMac): strin
 export const TOOLBAR_SHORTCUTS = {
   open: { key: "O", mod: true },
   recent: { key: "O", mod: true, shift: true },
+  reload: { key: "R", mod: true },
   save: { key: "S", mod: true },
   search: { key: "F", mod: true },
   filter: { key: "F", mod: true, shift: true },

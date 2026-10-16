@@ -5,6 +5,7 @@ describe("shortcuts utility", () => {
   it("formats macOS shortcuts using standard Apple symbols in HIG order", () => {
     // macOS: Alt ⌥, Shift ⇧, Command ⌘
     expect(formatShortcut({ key: "O", mod: true }, true)).toBe("⌘O");
+    expect(formatShortcut({ key: "R", mod: true }, true)).toBe("⌘R");
     expect(formatShortcut({ key: "S", mod: true }, true)).toBe("⌘S");
     expect(formatShortcut({ key: "F", mod: true }, true)).toBe("⌘F");
     expect(formatShortcut({ key: "F", mod: true, shift: true }, true)).toBe("⇧⌘F");
@@ -18,6 +19,7 @@ describe("shortcuts utility", () => {
 
   it("formats Windows/Linux shortcuts using standard Ctrl+Shift+Key style", () => {
     expect(formatShortcut({ key: "O", mod: true }, false)).toBe("Ctrl+O");
+    expect(formatShortcut({ key: "R", mod: true }, false)).toBe("Ctrl+R");
     expect(formatShortcut({ key: "S", mod: true }, false)).toBe("Ctrl+S");
     expect(formatShortcut({ key: "F", mod: true }, false)).toBe("Ctrl+F");
     expect(formatShortcut({ key: "F", mod: true, shift: true }, false)).toBe("Ctrl+Shift+F");
@@ -31,7 +33,7 @@ describe("shortcuts utility", () => {
 
   it("provides valid toolbar shortcut labels for all registered actions", () => {
     const actions = Object.keys(TOOLBAR_SHORTCUTS) as Array<keyof typeof TOOLBAR_SHORTCUTS>;
-    expect(actions.length).toBe(11);
+    expect(actions.length).toBe(12);
 
     for (const action of actions) {
       const macLabel = getToolbarShortcutLabel(action, true);

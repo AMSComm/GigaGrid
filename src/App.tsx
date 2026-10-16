@@ -13,7 +13,7 @@ import { StatusBar, type GridStats } from "./components/StatusBar";
 import { loadSettings, saveSettings, pushRecentFile, type Settings, type Theme } from "./settings";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { getToolbarShortcutLabel } from "./utils/shortcuts";
-import { IconFolder, IconSave, IconMonitor, IconSun, IconMoon, IconGrid, IconPin, IconClock } from "./icons";
+import { IconFolder, IconSave, IconMonitor, IconSun, IconMoon, IconGrid, IconPin, IconClock, IconRefresh } from "./icons";
 import {
   findExistingTab,
   getAdjacentTabIndex,
@@ -36,6 +36,7 @@ interface Tab {
   meta: FileMeta;
   error: string | null;
   saving: boolean;
+  reloading?: boolean;
   savedAt: Date | null;
   stats: GridStats;
   dirty: boolean;
@@ -169,12 +170,19 @@ function App() {
         saveFile(currentActive);
       }
     });
+    const unlistenReload = listen("reload-active-file", () => {
+      const currentActive = activeTabIdRef.current;
+      if (currentActive !== null) {
+        reloadFile(currentActive);
+      }
+    });
     return () => {
       isMounted = false;
       unlistenOpen.then((f) => f());
       unlistenOpenDialog.then((f) => f());
       unlistenClose.then((f) => f());
       unlistenSave.then((f) => f());
+      unlistenReload.then((f) => f());
       if (unlistenDragDrop) (unlistenDragDrop as () => void)();
       window.removeEventListener("dragover", handleDragOver);
       window.removeEventListener("dragleave", handleDragLeave);
@@ -310,6 +318,16 @@ function App() {
         return;
       }
 
+      // Reload active tab: Cmd+R / Ctrl+R or F5 (intercepted globally to prevent webview reload)
+      if ((mod && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "r") || e.key === "F5") {
+        e.preventDefault();
+        const currentActive = activeTabIdRef.current;
+        if (currentActive !== null) {
+          reloadFile(currentActive);
+        }
+        return;
+      }
+
       if (activeTabId === null) return;
 
       // Save active tab: Cmd+S / Ctrl+S
@@ -382,8 +400,8 @@ function App() {
         return;
       }
 
-      // 5. Go to row/col: Cmd+L / Ctrl+L OR F5
-      if ((mod && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "l") || e.key === "F5") {
+      // 5. Go to row/col: Cmd+L / Ctrl+L
+      if (mod && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "l") {
         e.preventDefault();
         setShowFilter(false);
         setShowRecent(false);
@@ -666,6 +684,41 @@ function App() {
     }
   }
 
+  async function reloadFile(tabId: number) {
+    const tab = tabsRef.current.find((t) => t.meta.tab_id === tabId);
+    if (!tab) return;
+    if (tab.dirty) {
+      const ok = await ask(
+        `"${tab.meta.path}" has unsaved changes. Reload from disk and discard them?`,
+        {
+          title: "Unsaved Changes",
+          kind: "warning",
+          okLabel: "Discard",
+          cancelLabel: "Cancel",
+        },
+      );
+      if (!ok) return;
+    }
+
+    updateTab(tabId, { reloading: true });
+    try {
+      const newMeta = await invoke<FileMeta>("reload_file", { tabId });
+      updateTab(tabId, {
+        meta: newMeta,
+        dirty: false,
+        saving: false,
+        reloading: false,
+        filterActive: false,
+        sortActive: false,
+        filterEdits: new Set(),
+        error: null,
+      });
+      gridRefs.current.get(tabId)?.invalidateCache();
+    } catch (e) {
+      updateTab(tabId, { reloading: false, error: String(e) });
+    }
+  }
+
   async function saveFile(tabId: number) {
     updateTab(tabId, { saving: true });
     try {
@@ -901,6 +954,24 @@ function App() {
                 </div>
               )}
             </div>
+            <button
+              className="icon-btn"
+              data-action="reload-file"
+              title={
+                !activeTab
+                  ? "Reload from disk (no active file)"
+                  : activeTab.reloading
+                    ? "Reloading…"
+                    : `Reload from disk (${getToolbarShortcutLabel("reload")})`
+              }
+              aria-label={`Reload from disk (${getToolbarShortcutLabel("reload")})`}
+              onClick={() => {
+                if (activeTab) reloadFile(activeTab.meta.tab_id);
+              }}
+              disabled={!activeTab || activeTab.reloading}
+            >
+              <IconRefresh className={activeTab?.reloading ? "spin-icon" : undefined} />
+            </button>
             <button
               className="icon-btn"
               data-action="save-file"

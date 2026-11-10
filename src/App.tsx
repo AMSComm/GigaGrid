@@ -13,6 +13,7 @@ import { StatusBar, type GridStats } from "./components/StatusBar";
 import { loadSettings, saveSettings, pushRecentFile, type Settings, type Theme } from "./settings";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { getToolbarShortcutLabel } from "./utils/shortcuts";
+import { createDefaultFilterRules, type FilterRule } from "./utils/filterRules";
 import { IconFolder, IconSave, IconMonitor, IconSun, IconMoon, IconGrid, IconPin, IconClock, IconRefresh } from "./icons";
 import {
   findExistingTab,
@@ -43,6 +44,8 @@ interface Tab {
   filterActive: boolean;
   sortActive: boolean;
   filterEdits: Set<string>;
+  filterRules: FilterRule[];
+  appliedFilterCount: number;
 }
 
 const EMPTY_STATS: GridStats = { totalCols: 0, cursor: null, selection: null };
@@ -514,6 +517,8 @@ function App() {
         filterActive: false,
         sortActive: false,
         filterEdits: new Set(),
+        filterRules: createDefaultFilterRules(),
+        appliedFilterCount: 0,
       };
       tabsRef.current = [...tabsRef.current, newTab];
       setTabs((prev) => [...prev, newTab]);
@@ -711,6 +716,8 @@ function App() {
         filterActive: false,
         sortActive: false,
         filterEdits: new Set(),
+        filterRules: createDefaultFilterRules(),
+        appliedFilterCount: 0,
         error: null,
       });
       gridRefs.current.get(tabId)?.invalidateCache();
@@ -843,10 +850,16 @@ function App() {
                   filterActive={activeTab.filterActive}
                   hasFilterEdits={activeTab.filterEdits.size > 0}
                   freezeHeader={settings.freezeHeader}
+                  filterRules={activeTab.filterRules}
+                  appliedFilterCount={activeTab.appliedFilterCount}
+                  onFilterRulesChange={(filterRules) =>
+                    updateTab(activeTab.meta.tab_id, { filterRules })
+                  }
                   onError={(message) => updateTab(activeTab.meta.tab_id, { error: message })}
-                  onFilterChange={(active, rowCount) => {
+                  onFilterChange={(active, rowCount, appliedCount) => {
                     updateTab(activeTab.meta.tab_id, {
                       filterActive: active,
+                      appliedFilterCount: appliedCount ?? (active ? 1 : 0),
                       filterEdits: new Set(),
                       meta: { ...activeTab.meta, row_count: rowCount },
                     });

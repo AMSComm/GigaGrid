@@ -1,14 +1,17 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { IconSearch, IconHash, IconFilter, IconRefresh } from "../icons";
 import { getToolbarShortcutLabel } from "../utils/shortcuts";
+import {
+  addFilterRule,
+  createDefaultFilterRules,
+  extractActiveCriteria,
+  removeFilterRule,
+  updateFilterRule,
+  type FilterRule,
+} from "../utils/filterRules";
 
-export interface FilterRule {
-  id: number;
-  col: number | null; // null = All Columns, or 0-based column index
-  query: string;
-  enabled: boolean;
-}
+export type { FilterRule } from "../utils/filterRules";
 
 interface ToolbarProps {
   tabId: number;
@@ -26,7 +29,10 @@ interface ToolbarProps {
   filterActive?: boolean;
   hasFilterEdits?: boolean;
   freezeHeader?: boolean;
-  onFilterChange: (active: boolean, rowCount: number) => void;
+  filterRules?: FilterRule[];
+  appliedFilterCount?: number;
+  onFilterRulesChange?: (rules: FilterRule[]) => void;
+  onFilterChange: (active: boolean, rowCount: number, appliedCount?: number) => void;
   onError?: (message: string | null) => void;
 }
 
@@ -46,6 +52,9 @@ export function Toolbar({
   filterActive,
   hasFilterEdits,
   freezeHeader,
+  filterRules: filterRulesProp,
+  appliedFilterCount: appliedFilterCountProp,
+  onFilterRulesChange,
   onFilterChange,
   onError,
 }: ToolbarProps) {
@@ -53,11 +62,13 @@ export function Toolbar({
   const [gotoCol, setGotoCol] = useState("");
   const [isFiltering, setIsFiltering] = useState(false);
 
-  const nextRuleId = useRef(2);
-  const [filterRules, setFilterRules] = useState<FilterRule[]>([
-    { id: 1, col: null, query: "", enabled: true },
-  ]);
-  const [appliedCount, setAppliedCount] = useState(0);
+  const [localRules, setLocalRules] = useState<FilterRule[]>(() => createDefaultFilterRules());
+  const filterRules =
+    filterRulesProp && filterRulesProp.length > 0 ? filterRulesProp : localRules;
+  const appliedCount = appliedFilterCountProp ?? (filterActive ? 1 : 0);
+
+  const isFilterHighlighted = Boolean(filterActive || appliedCount > 0);
+  const displayCount = appliedCount > 0 ? appliedCount : filterActive ? 1 : 0;
 
   useEffect(() => {
     function onDocClick(e: MouseEvent) {
@@ -90,17 +101,15 @@ export function Toolbar({
 
   function applyFilters() {
     if (isFiltering) return;
-    const activeCriteria = filterRules
-      .filter((r) => r.enabled && r.query.trim().length > 0)
-      .map((r) => ({ col: r.col, query: r.query.trim() }));
+    const activeCriteria = extractActiveCriteria(filterRules);
 
     setIsFiltering(true);
     onError?.(null);
     invoke<number>("set_filters", { tabId, filters: activeCriteria, freezeHeader: freezeHeader ?? true })
       .then((rowCount) => {
         setIsFiltering(false);
-        setAppliedCount(activeCriteria.length);
-        onFilterChange(activeCriteria.length > 0, rowCount);
+        onFilterRulesChange?.(filterRules);
+        onFilterChange(activeCriteria.length > 0, rowCount, activeCriteria.length);
         onCloseFilter();
       })
       .catch((err) => {
@@ -110,26 +119,24 @@ export function Toolbar({
       });
   }
 
-  function reapplyFilters() {
+  const reapplyFilters = useCallback(() => {
     if (isFiltering) return;
-    const activeCriteria = filterRules
-      .filter((r) => r.enabled && r.query.trim().length > 0)
-      .map((r) => ({ col: r.col, query: r.query.trim() }));
+    const activeCriteria = extractActiveCriteria(filterRules);
 
     setIsFiltering(true);
     onError?.(null);
     invoke<number>("set_filters", { tabId, filters: activeCriteria, freezeHeader: freezeHeader ?? true })
       .then((rowCount) => {
         setIsFiltering(false);
-        setAppliedCount(activeCriteria.length);
-        onFilterChange(activeCriteria.length > 0, rowCount);
+        onFilterRulesChange?.(filterRules);
+        onFilterChange(activeCriteria.length > 0, rowCount, activeCriteria.length);
       })
       .catch((err) => {
         setIsFiltering(false);
         const msg = typeof err === "string" ? err : (err?.message || "Failed to re-apply filter");
         onError?.(msg);
       });
-  }
+  }, [isFiltering, filterRules, onError, tabId, freezeHeader, onFilterRulesChange, onFilterChange]);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -144,7 +151,7 @@ export function Toolbar({
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [filterActive, hasFilterEdits, filterRules, tabId]);
+  }, [filterActive, hasFilterEdits, reapplyFilters]);
 
   function clearAllFilters() {
     if (isFiltering) return;
@@ -153,9 +160,12 @@ export function Toolbar({
     invoke<number>("set_filters", { tabId, filters: [], freezeHeader: freezeHeader ?? true })
       .then((rowCount) => {
         setIsFiltering(false);
-        setFilterRules([{ id: nextRuleId.current++, col: null, query: "", enabled: true }]);
-        setAppliedCount(0);
-        onFilterChange(false, rowCount);
+        const resetRules = createDefaultFilterRules();
+        if (!filterRulesProp) {
+          setLocalRules(resetRules);
+        }
+        onFilterRulesChange?.(resetRules);
+        onFilterChange(false, rowCount, 0);
         onCloseFilter();
       })
       .catch((err) => {
@@ -166,25 +176,27 @@ export function Toolbar({
   }
 
   function updateRule(id: number, patch: Partial<FilterRule>) {
-    setFilterRules((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, ...patch } : r)),
-    );
+    const next = updateFilterRule(filterRules, id, patch);
+    if (!filterRulesProp) {
+      setLocalRules(next);
+    }
+    onFilterRulesChange?.(next);
   }
 
   function addRule() {
-    setFilterRules((prev) => [
-      ...prev,
-      { id: nextRuleId.current++, col: null, query: "", enabled: true },
-    ]);
+    const next = addFilterRule(filterRules);
+    if (!filterRulesProp) {
+      setLocalRules(next);
+    }
+    onFilterRulesChange?.(next);
   }
 
   function removeRule(id: number) {
-    setFilterRules((prev) => {
-      const remaining = prev.filter((r) => r.id !== id);
-      return remaining.length > 0
-        ? remaining
-        : [{ id: nextRuleId.current++, col: null, query: "", enabled: true }];
-    });
+    const next = removeFilterRule(filterRules, id);
+    if (!filterRulesProp) {
+      setLocalRules(next);
+    }
+    onFilterRulesChange?.(next);
   }
 
   return (
@@ -205,10 +217,10 @@ export function Toolbar({
         <button
           className="icon-btn"
           data-action="filter"
-          data-active={showFilter || appliedCount > 0}
+          data-active={showFilter || isFilterHighlighted}
           title={
-            appliedCount > 0
-              ? `Filters (${appliedCount} active) (${getToolbarShortcutLabel("filter")})`
+            isFilterHighlighted && displayCount > 0
+              ? `Filters (${displayCount} active) (${getToolbarShortcutLabel("filter")})`
               : `Filters (${getToolbarShortcutLabel("filter")})`
           }
           aria-label={`Filters (${getToolbarShortcutLabel("filter")})`}
@@ -247,9 +259,9 @@ export function Toolbar({
             >
               <span>Filter Criteria</span>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                {appliedCount > 0 && (
+                {isFilterHighlighted && displayCount > 0 && (
                   <span style={{ fontSize: 11, opacity: 0.7, fontWeight: 400 }}>
-                    {appliedCount} active
+                    {displayCount} active
                   </span>
                 )}
                 <span style={{ fontSize: 11, opacity: 0.5, fontWeight: 400 }}>
@@ -404,7 +416,7 @@ export function Toolbar({
                 + Add condition
               </button>
               <div style={{ display: "flex", gap: 6 }}>
-                {appliedCount > 0 && (
+                {isFilterHighlighted && (
                   <button
                     type="button"
                     disabled={isFiltering}
@@ -439,7 +451,7 @@ export function Toolbar({
                     fontWeight: 500,
                   }}
                 >
-                  {isFiltering ? "Applying…" : appliedCount > 0 ? "Re-apply" : "Apply"}
+                  {isFiltering ? "Applying…" : isFilterHighlighted ? "Re-apply" : "Apply"}
                 </button>
               </div>
             </div>

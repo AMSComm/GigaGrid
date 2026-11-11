@@ -2,6 +2,18 @@
 
 All notable changes to **Gigagrid** will be documented in this file.
 
+## [v0.5.8] - 2026-11-11
+
+### 🐛 Bug Fixes
+- **Preserve Filter State Across Tab Switches**:
+  - Lifted filter criteria configuration (`filterRules`) and active filter count (`appliedFilterCount`) from local `Toolbar` component state to `Tab` state in `App.tsx`.
+  - Prevented filter rules and active state from resetting when switching between tabs.
+  - Retained toolbar filter active indicator (`Filters (N active)`) and popover condition rules when returning to previously filtered tabs.
+  - Ensured the "Clear" button remains accessible and "Re-apply filter" (`Cmd+Shift+R`) preserves the current tab's active filter criteria without resetting the view.
+  - Added unit test suite for filter rule transformations and multi-tab state isolation.
+
+---
+
 ## [v0.5.7] - 2026-10-16
 
 ### 🚀 Features & Enhancements

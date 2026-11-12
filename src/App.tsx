@@ -13,7 +13,11 @@ import { StatusBar, type GridStats } from "./components/StatusBar";
 import { loadSettings, saveSettings, pushRecentFile, type Settings, type Theme } from "./settings";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { getToolbarShortcutLabel } from "./utils/shortcuts";
-import { createDefaultFilterRules, type FilterRule } from "./utils/filterRules";
+import {
+  type ColumnFilter,
+  countActiveColumnFilters,
+  toBackendCriteria,
+} from "./utils/filterRules";
 import { IconFolder, IconSave, IconMonitor, IconSun, IconMoon, IconGrid, IconPin, IconClock, IconRefresh } from "./icons";
 import {
   findExistingTab,
@@ -44,8 +48,7 @@ interface Tab {
   filterActive: boolean;
   sortActive: boolean;
   filterEdits: Set<string>;
-  filterRules: FilterRule[];
-  appliedFilterCount: number;
+  columnFilters: Record<number, ColumnFilter>;
 }
 
 const EMPTY_STATS: GridStats = { totalCols: 0, cursor: null, selection: null };
@@ -59,7 +62,6 @@ function App() {
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [showRecent, setShowRecent] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
-  const [showFilter, setShowFilter] = useState(false);
   const [showGoto, setShowGoto] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const gridRefs = useRef<Map<number, GridHandle>>(new Map());
@@ -77,7 +79,6 @@ function App() {
   }, [settings.theme]);
 
   useEffect(() => {
-    setShowFilter(false);
     setShowGoto(false);
     setShowRecent(false);
   }, [activeTabId]);
@@ -269,7 +270,6 @@ function App() {
       if (mod && !e.altKey && e.shiftKey && e.key.toLowerCase() === "o") {
         e.preventDefault();
         setShowRecent((v) => !v);
-        setShowFilter(false);
         setShowGoto(false);
         return;
       }
@@ -388,25 +388,41 @@ function App() {
       // Cmd+F: Toggle search panel; when opening -> select all
       if (mod && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "f") {
         e.preventDefault();
-        setShowFilter(false);
         setShowGoto(false);
         toggleSearch();
         return;
       }
 
-      // 4. Filter shortcut: Cmd+Shift+F / Ctrl+Shift+F
+      // 4. Filter shortcut: Cmd+Shift+F / Ctrl+Shift+F -> open column filter for current column
       if (mod && !e.altKey && e.shiftKey && e.key.toLowerCase() === "f") {
         e.preventDefault();
         setShowGoto(false);
         setShowRecent(false);
-        setShowFilter((v) => !v);
+        const curTabId = activeTabIdRef.current;
+        if (curTabId !== null) {
+          const curTab = tabsRef.current.find((t) => t.meta.tab_id === curTabId);
+          const targetCol = curTab?.stats.cursor?.col ?? 0;
+          gridRefs.current.get(curTabId)?.openFilter?.(targetCol);
+        }
         return;
+      }
+
+      // Reapply filter shortcut: Cmd+Shift+R / Ctrl+Shift+R
+      if (mod && !e.altKey && e.shiftKey && e.key.toLowerCase() === "r") {
+        const curTabId = activeTabIdRef.current;
+        if (curTabId !== null) {
+          const curTab = tabsRef.current.find((t) => t.meta.tab_id === curTabId);
+          if (curTab && curTab.filterEdits.size > 0) {
+            e.preventDefault();
+            reapplyFiltersFor(curTabId);
+            return;
+          }
+        }
       }
 
       // 5. Go to row/col: Cmd+L / Ctrl+L
       if (mod && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "l") {
         e.preventDefault();
-        setShowFilter(false);
         setShowRecent(false);
         setShowGoto((v) => !v);
         return;
@@ -430,15 +446,11 @@ function App() {
         return;
       }
 
-      // 7. Escape: close search panel, recent files, filter, or goto if open
+      // 7. Escape: close search panel, recent files, or goto if open
       if (e.key === "Escape") {
         let handled = false;
         if (showSearch) {
           setShowSearch(false);
-          handled = true;
-        }
-        if (showFilter) {
-          setShowFilter(false);
           handled = true;
         }
         if (showGoto) {
@@ -458,7 +470,7 @@ function App() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activeTabId, tabs, showSearch, showFilter, showGoto, showRecent, showUpdateDialog]);
+  }, [activeTabId, tabs, showSearch, showGoto, showRecent, showUpdateDialog]);
 
   function updateSettings(patch: Partial<Settings>) {
     setSettings((prev) => {
@@ -517,8 +529,7 @@ function App() {
         filterActive: false,
         sortActive: false,
         filterEdits: new Set(),
-        filterRules: createDefaultFilterRules(),
-        appliedFilterCount: 0,
+        columnFilters: {},
       };
       tabsRef.current = [...tabsRef.current, newTab];
       setTabs((prev) => [...prev, newTab]);
@@ -716,8 +727,7 @@ function App() {
         filterActive: false,
         sortActive: false,
         filterEdits: new Set(),
-        filterRules: createDefaultFilterRules(),
-        appliedFilterCount: 0,
+        columnFilters: {},
         error: null,
       });
       gridRefs.current.get(tabId)?.invalidateCache();
@@ -749,6 +759,47 @@ function App() {
   function handleReplacedFor(tabId: number) {
     gridRefs.current.get(tabId)?.invalidateCache();
     updateTab(tabId, { dirty: true });
+  }
+
+  async function clearAllFiltersFor(tabId: number) {
+    try {
+      const newCount = await invoke<number>("set_filters", {
+        filters: [],
+        tabId,
+        freezeHeader: settings.freezeHeader,
+      });
+      const tab = tabsRef.current.find((t) => t.meta.tab_id === tabId);
+      updateTab(tabId, {
+        columnFilters: {},
+        filterActive: false,
+        filterEdits: new Set(),
+        meta: tab ? { ...tab.meta, row_count: newCount } : undefined,
+      });
+      gridRefs.current.get(tabId)?.invalidateCache();
+    } catch (err) {
+      updateTab(tabId, { error: String(err) });
+    }
+  }
+
+  async function reapplyFiltersFor(tabId: number) {
+    const tab = tabsRef.current.find((t) => t.meta.tab_id === tabId);
+    if (!tab) return;
+    try {
+      const criteria = toBackendCriteria(tab.columnFilters);
+      const newCount = await invoke<number>("set_filters", {
+        filters: criteria,
+        tabId,
+        freezeHeader: settings.freezeHeader,
+      });
+      updateTab(tabId, {
+        filterActive: criteria.length > 0,
+        filterEdits: new Set(),
+        meta: { ...tab.meta, row_count: newCount },
+      });
+      gridRefs.current.get(tabId)?.invalidateCache();
+    } catch (err) {
+      updateTab(tabId, { error: String(err) });
+    }
   }
 
   const ThemeIcon = settings.theme === "system" ? IconMonitor : settings.theme === "light" ? IconSun : IconMoon;
@@ -825,46 +876,25 @@ function App() {
                   tabId={activeTab.meta.tab_id}
                   totalCols={activeTab.stats.totalCols}
                   visible={showSearch}
-                  showFilter={showFilter}
-                  onToggleFilter={() => {
-                    setShowFilter((v) => !v);
-                    setShowGoto(false);
-                    setShowRecent(false);
-                  }}
-                  onCloseFilter={() => setShowFilter(false)}
                   showGoto={showGoto}
                   onToggleGoto={() => {
                     setShowGoto((v) => !v);
-                    setShowFilter(false);
                     setShowRecent(false);
                   }}
                   onCloseGoto={() => setShowGoto(false)}
                   onNavigate={(row, col) => handleNavigateFor(activeTab.meta.tab_id, row, col)}
                   onToggleSearch={() => {
-                    setShowFilter(false);
                     setShowGoto(false);
                     setShowRecent(false);
                     toggleSearch();
                   }}
                   viewActive={activeTab.filterActive || activeTab.sortActive}
                   filterActive={activeTab.filterActive}
+                  activeFilterCount={countActiveColumnFilters(activeTab.columnFilters)}
                   hasFilterEdits={activeTab.filterEdits.size > 0}
-                  freezeHeader={settings.freezeHeader}
-                  filterRules={activeTab.filterRules}
-                  appliedFilterCount={activeTab.appliedFilterCount}
-                  onFilterRulesChange={(filterRules) =>
-                    updateTab(activeTab.meta.tab_id, { filterRules })
-                  }
+                  onClearAllFilters={() => clearAllFiltersFor(activeTab.meta.tab_id)}
+                  onReapplyFilters={() => reapplyFiltersFor(activeTab.meta.tab_id)}
                   onError={(message) => updateTab(activeTab.meta.tab_id, { error: message })}
-                  onFilterChange={(active, rowCount, appliedCount) => {
-                    updateTab(activeTab.meta.tab_id, {
-                      filterActive: active,
-                      appliedFilterCount: appliedCount ?? (active ? 1 : 0),
-                      filterEdits: new Set(),
-                      meta: { ...activeTab.meta, row_count: rowCount },
-                    });
-                    gridRefs.current.get(activeTab.meta.tab_id)?.invalidateCache();
-                  }}
                 />
               </div>
               <div className="toolbar-divider" />
@@ -927,7 +957,6 @@ function App() {
                 aria-label={`Recent files (${getToolbarShortcutLabel("recent")})`}
                 onClick={() => {
                   setShowRecent((v) => !v);
-                  setShowFilter(false);
                   setShowGoto(false);
                 }}
                 disabled={settings.recentFiles.length === 0}
@@ -1037,6 +1066,16 @@ function App() {
                     viewActive={tab.filterActive || tab.sortActive}
                     filterActive={tab.filterActive}
                     sortActive={tab.sortActive}
+                    columnFilters={tab.columnFilters}
+                    onColumnFiltersChange={(columnFilters, newRowCount) => {
+                      const activeCount = countActiveColumnFilters(columnFilters);
+                      updateTab(tab.meta.tab_id, {
+                        columnFilters,
+                        filterActive: activeCount > 0,
+                        filterEdits: new Set(),
+                        meta: { ...tab.meta, row_count: newRowCount },
+                      });
+                    }}
                     filterEdits={tab.filterEdits}
                     onFilterEditsChange={(filterEdits) => updateTab(tab.meta.tab_id, { filterEdits })}
                     onSortChange={(active, rowCount) => updateTab(tab.meta.tab_id, { sortActive: active, meta: { ...tab.meta, row_count: rowCount } })}

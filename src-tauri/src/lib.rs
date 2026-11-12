@@ -189,6 +189,7 @@ pub fn run() {
             commands::set_sort,
             commands::set_filter,
             commands::set_filters,
+            commands::get_column_distinct_values,
             commands::get_selection_stats,
             commands::clear_sort,
             commands::clear_view,

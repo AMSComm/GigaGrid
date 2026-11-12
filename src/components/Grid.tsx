@@ -2,6 +2,13 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type CSSP
 import { invoke } from "@tauri-apps/api/core";
 import { Cell } from "./Cell";
 import type { GridStats } from "./StatusBar";
+import { ColumnFilterPopover } from "./ColumnFilterPopover";
+import {
+  type ColumnFilter,
+  isColumnFilterActive,
+  toBackendCriteria,
+} from "../utils/filterRules";
+import { IconFilter } from "../icons";
 
 const ROW_HEIGHT = 28;
 const OVERSCAN = 10;
@@ -367,6 +374,8 @@ interface GridProps {
   viewActive: boolean;
   filterActive?: boolean;
   sortActive?: boolean;
+  columnFilters?: Record<number, ColumnFilter>;
+  onColumnFiltersChange?: (filters: Record<number, ColumnFilter>, newRowCount: number) => void;
   filterEdits?: Set<string>;
   onFilterEditsChange?: (edits: Set<string>) => void;
   onSortChange: (active: boolean, rowCount: number) => void;
@@ -392,6 +401,7 @@ export interface GridHandle {
   invalidateCache: () => void;
   autoFitCol?: (col: number) => void;
   autoFitAllCols?: () => void;
+  openFilter?: (col?: number) => void;
 }
 
 /**
@@ -423,6 +433,8 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
   viewActive,
   filterActive,
   sortActive,
+  columnFilters,
+  onColumnFiltersChange,
   filterEdits,
   onFilterEditsChange,
   onSortChange,
@@ -459,6 +471,11 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
   const [editingCell, setEditingCell] = useState<CellPos | null>(null);
   const [rowHeight, setRowHeight] = useState(ROW_HEIGHT);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [activeFilterPopover, setActiveFilterPopover] = useState<{
+    col: number;
+    colName?: string;
+    anchor: { x: number; y: number };
+  } | null>(null);
   const gutterWidth = computeGutterWidth(rowCount);
 
   // When freezeHeader is on, row 0 is permanently shown via the frozen bar and
@@ -733,6 +750,13 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
     invalidateCache,
     autoFitCol,
     autoFitAllCols,
+    openFilter: (col?: number) => {
+      const targetCol = col ?? selEnd?.col ?? 0;
+      const rect = containerRef.current?.getBoundingClientRect();
+      const x = (rect?.left ?? 100) + 120;
+      const y = (rect?.top ?? 100) + (showGridChrome ? HEADER_HEIGHT : 0) + 10;
+      openFilterPopoverForCol(targetCol, x, y);
+    },
   }));
 
   useEffect(() => {
@@ -1075,9 +1099,86 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
     onDirtyChange?.(true);
   }
 
-  async function sortByCol(col: number) {
+  function getColumnName(colIndex: number): string {
+    if (freezeHeader && rowCount > 0) {
+      const row0 = rowsByIndex.get(0);
+      if (row0 && row0[colIndex] !== undefined && row0[colIndex] !== "") {
+        return row0[colIndex];
+      }
+    }
+    return `Column ${colIndex + 1}`;
+  }
+
+  function openFilterPopoverForCol(col: number, clientX: number, clientY: number, customName?: string) {
+    const colName = customName ?? getColumnName(col);
+    const safeX = Math.min(Math.max(10, clientX), Math.max(10, window.innerWidth - 340));
+    const safeY = Math.min(Math.max(10, clientY), Math.max(10, window.innerHeight - 440));
+    setActiveFilterPopover({
+      col,
+      colName,
+      anchor: { x: safeX, y: safeY },
+    });
+  }
+
+  async function handleApplyColumnFilter(filter: ColumnFilter) {
+    try {
+      const nextFilters = { ...(columnFilters ?? {}) };
+      if (isColumnFilterActive(filter)) {
+        nextFilters[filter.col] = filter;
+      } else {
+        delete nextFilters[filter.col];
+      }
+      const criteria = toBackendCriteria(nextFilters);
+      const newCount = await invoke<number>("set_filters", {
+        filters: criteria,
+        tabId,
+        freezeHeader,
+      });
+      invalidateCache();
+      onColumnFiltersChange?.(nextFilters, newCount);
+      setActiveFilterPopover(null);
+    } catch (err) {
+      onError?.(String(err));
+    }
+  }
+
+  async function handleClearColumnFilter(col: number) {
+    try {
+      const nextFilters = { ...(columnFilters ?? {}) };
+      delete nextFilters[col];
+      const criteria = toBackendCriteria(nextFilters);
+      const newCount = await invoke<number>("set_filters", {
+        filters: criteria,
+        tabId,
+        freezeHeader,
+      });
+      invalidateCache();
+      onColumnFiltersChange?.(nextFilters, newCount);
+      setActiveFilterPopover(null);
+    } catch (err) {
+      onError?.(String(err));
+    }
+  }
+
+  async function handleSortColumnFromPopover(col: number, descending: boolean) {
+    try {
+      const newCount = await invoke<number>("set_sort", {
+        col,
+        tabId,
+        freezeHeader,
+        descending,
+      });
+      invalidateCache();
+      onSortChange(true, newCount);
+      setActiveFilterPopover(null);
+    } catch (err) {
+      onError?.(String(err));
+    }
+  }
+
+  async function sortByCol(col: number, descending: boolean = false) {
     setContextMenu(null);
-    const newCount = await invoke<number>("set_sort", { col, tabId, freezeHeader });
+    const newCount = await invoke<number>("set_sort", { col, tabId, freezeHeader, descending });
     invalidateCache();
     onSortChange(true, newCount);
   }
@@ -1352,6 +1453,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
             const isColSel = Boolean(bounds && c >= bounds.colMin && c <= bounds.colMax);
             const baseBg = c < freezeCols ? "var(--bg)" : "var(--header-bg)";
             const highlight = computeHeaderCellHighlight(isColSel, baseBg);
+            const isFiltered = Boolean(columnFilters && isColumnFilterActive(columnFilters[c]));
             return (
               <div
                 key={c}
@@ -1393,7 +1495,38 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
                     : {}),
                 }}
               >
-                {c + 1}
+                <span>{c + 1}</span>
+                <button
+                  type="button"
+                  className="col-filter-btn"
+                  data-active={isFiltered}
+                  title={isFiltered ? "Filter active on this column (click to edit)" : "Filter this column"}
+                  aria-label={`Filter column ${c + 1}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                    openFilterPopoverForCol(c, rect.left, rect.bottom + 4);
+                  }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  style={{
+                    position: "absolute",
+                    right: 6,
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    background: isFiltered ? "var(--primary-subtle, rgba(57,108,216,0.15))" : "transparent",
+                    border: isFiltered ? "1px solid var(--primary, #396cd8)" : "none",
+                    borderRadius: 3,
+                    cursor: "pointer",
+                    padding: "1px 2px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: isFiltered ? "var(--primary, #396cd8)" : "inherit",
+                    zIndex: 2,
+                  }}
+                >
+                  <IconFilter size={12} />
+                </button>
                 <div
                   onMouseDown={(e) => startColResize(e, c)}
                   onDoubleClick={(e) => {
@@ -1401,7 +1534,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
                     e.stopPropagation();
                     autoFitCol(c);
                   }}
-                  style={{ position: "absolute", right: -3, top: 0, bottom: 0, width: 6, cursor: "col-resize", zIndex: 2 }}
+                  style={{ position: "absolute", right: -3, top: 0, bottom: 0, width: 6, cursor: "col-resize", zIndex: 3 }}
                 />
               </div>
             );
@@ -1460,64 +1593,103 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
             </div>
           )}
           {frozenRow ? (
-            frozenRow.map((cell, ci) => (
-              <div
-                key={ci}
-                onMouseDown={(e) => {
-                  if ((e.target as HTMLElement).tagName === "TEXTAREA") return;
-                  e.preventDefault();
-                  if (e.shiftKey && selStart) {
-                    setSelEnd({ row: 0, col: ci });
-                  } else {
-                    startSelect(0, ci);
-                  }
-                }}
-                onMouseEnter={() => extendSelect(0, ci)}
-                style={{
-                  position: "relative",
-                  flexShrink: 0,
-                  width: colWidths[ci] ?? DEFAULT_COL_WIDTH,
-                  background: getCellBackground(0, ci, ci < freezeCols),
-                  ...chromeBorder,
-                  ...(ci < freezeCols
-                    ? {
-                        position: "sticky" as const,
-                        left: frozenLeft(ci),
-                        zIndex: 1,
-                        ...(ci === freezeCols - 1 ? { borderRight: "2px solid var(--border)" } : {}),
-                      }
-                    : {}),
-                }}
-              >
-                <Cell
-                  value={cell}
-                  editing={editingCell?.row === 0 && editingCell?.col === ci}
-                  onRequestEdit={() => requestEdit(0, ci)}
-                  onCommit={(v) => commitCell(0, ci, v)}
-                  onOverflow={() => handleOverflow(0)}
-                  onEditEnd={endEdit}
-                  isModified={Boolean(filterActive && filterEdits?.has(`0,${ci}`))}
-                />
+            frozenRow.map((cell, ci) => {
+              const isFiltered = Boolean(columnFilters && isColumnFilterActive(columnFilters[ci]));
+              return (
                 <div
-                  onMouseDown={(e) => startColResize(e, ci)}
-                  onDoubleClick={(e) => {
+                  key={ci}
+                  onMouseDown={(e) => {
+                    if ((e.target as HTMLElement).tagName === "TEXTAREA") return;
                     e.preventDefault();
-                    e.stopPropagation();
-                    autoFitCol(ci);
+                    if (e.shiftKey && selStart) {
+                      setSelEnd({ row: 0, col: ci });
+                    } else {
+                      startSelect(0, ci);
+                    }
                   }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setContextMenu({ x: e.clientX, y: e.clientY, kind: "col", index: ci });
+                  }}
+                  onMouseEnter={() => extendSelect(0, ci)}
                   style={{
-                    position: "absolute",
-                    right: -3,
-                    top: 0,
-                    bottom: 0,
-                    width: 6,
-                    cursor: "col-resize",
-                    zIndex: 2,
-                    display: editingCell?.row === 0 && editingCell?.col === ci ? "none" : "block",
+                    position: "relative",
+                    flexShrink: 0,
+                    width: colWidths[ci] ?? DEFAULT_COL_WIDTH,
+                    background: getCellBackground(0, ci, ci < freezeCols),
+                    ...chromeBorder,
+                    ...(ci < freezeCols
+                      ? {
+                          position: "sticky" as const,
+                          left: frozenLeft(ci),
+                          zIndex: 1,
+                          ...(ci === freezeCols - 1 ? { borderRight: "2px solid var(--border)" } : {}),
+                        }
+                      : {}),
                   }}
-                />
-              </div>
-            ))
+                >
+                  <Cell
+                    value={cell}
+                    editing={editingCell?.row === 0 && editingCell?.col === ci}
+                    onRequestEdit={() => requestEdit(0, ci)}
+                    onCommit={(v) => commitCell(0, ci, v)}
+                    onOverflow={() => handleOverflow(0)}
+                    onEditEnd={endEdit}
+                    isModified={Boolean(filterActive && filterEdits?.has(`0,${ci}`))}
+                  />
+                  {!showGridChrome && (
+                    <button
+                      type="button"
+                      className="col-filter-btn"
+                      data-active={isFiltered}
+                      title={isFiltered ? "Filter active on this column (click to edit)" : "Filter this column"}
+                      aria-label={`Filter column ${ci + 1}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                        openFilterPopoverForCol(ci, rect.left, rect.bottom + 4);
+                      }}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      style={{
+                        position: "absolute",
+                        right: 6,
+                        top: 4,
+                        background: isFiltered ? "var(--primary-subtle, rgba(57,108,216,0.15))" : "transparent",
+                        border: isFiltered ? "1px solid var(--primary, #396cd8)" : "none",
+                        borderRadius: 3,
+                        cursor: "pointer",
+                        padding: "1px 2px",
+                        display: editingCell?.row === 0 && editingCell?.col === ci ? "none" : "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        color: isFiltered ? "var(--primary, #396cd8)" : "inherit",
+                        zIndex: 2,
+                      }}
+                    >
+                      <IconFilter size={12} />
+                    </button>
+                  )}
+                  <div
+                    onMouseDown={(e) => startColResize(e, ci)}
+                    onDoubleClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      autoFitCol(ci);
+                    }}
+                    style={{
+                      position: "absolute",
+                      right: -3,
+                      top: 0,
+                      bottom: 0,
+                      width: 6,
+                      cursor: "col-resize",
+                      zIndex: 2,
+                      display: editingCell?.row === 0 && editingCell?.col === ci ? "none" : "block",
+                    }}
+                  />
+                </div>
+              );
+            })
           ) : (
             <div style={{ padding: "0 6px", opacity: 0.4, display: "flex", alignItems: "center" }}>…</div>
           )}
@@ -1684,7 +1856,18 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
               >
                 Auto-fit all columns
               </button>
-              <button onClick={() => sortByCol(contextMenu.index)}>Sort by this column</button>
+              <button
+                onClick={(e) => {
+                  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                  const col = contextMenu.index;
+                  setContextMenu(null);
+                  openFilterPopoverForCol(col, rect.left, rect.bottom + 4);
+                }}
+              >
+                Filter this column…
+              </button>
+              <button onClick={() => sortByCol(contextMenu.index, false)}>Sort A → Z</button>
+              <button onClick={() => sortByCol(contextMenu.index, true)}>Sort Z → A</button>
               <button onClick={clearSort}>Clear sort</button>
               {contextMenu.index < freezeCols ? (
                 <button
@@ -1714,6 +1897,19 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid({
             </>
           )}
         </div>
+      )}
+      {activeFilterPopover && (
+        <ColumnFilterPopover
+          tabId={tabId}
+          col={activeFilterPopover.col}
+          colName={activeFilterPopover.colName}
+          anchor={activeFilterPopover.anchor}
+          currentFilter={columnFilters?.[activeFilterPopover.col]}
+          onApply={handleApplyColumnFilter}
+          onClear={() => handleClearColumnFilter(activeFilterPopover.col)}
+          onSort={(descending) => handleSortColumnFromPopover(activeFilterPopover.col, descending)}
+          onClose={() => setActiveFilterPopover(null)}
+        />
       )}
     </div>
   );

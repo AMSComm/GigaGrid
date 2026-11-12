@@ -506,4 +506,18 @@ button {
   animation: spin 1s linear infinite;
 }
 
+.col-filter-btn {
+  opacity: 0.45;
+  transition: opacity 0.15s, background-color 0.15s;
+}
+
+.col-filter-btn:hover,
+.col-filter-btn[data-active="true"] {
+  opacity: 1 !important;
+}
+
+.column-filter-sort-btn:hover {
+  background: var(--hover, rgba(0, 0, 0, 0.05)) !important;
+}
+
 

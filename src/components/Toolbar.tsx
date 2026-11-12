@@ -1,25 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { IconSearch, IconHash, IconFilter, IconRefresh } from "../icons";
 import { getToolbarShortcutLabel } from "../utils/shortcuts";
-import {
-  addFilterRule,
-  createDefaultFilterRules,
-  extractActiveCriteria,
-  removeFilterRule,
-  updateFilterRule,
-  type FilterRule,
-} from "../utils/filterRules";
-
-export type { FilterRule } from "../utils/filterRules";
 
 interface ToolbarProps {
   tabId: number;
   totalCols: number;
   visible: boolean;
-  showFilter: boolean;
-  onToggleFilter: () => void;
-  onCloseFilter: () => void;
   showGoto: boolean;
   onToggleGoto: () => void;
   onCloseGoto: () => void;
@@ -27,66 +14,44 @@ interface ToolbarProps {
   onToggleSearch: () => void;
   viewActive: boolean;
   filterActive?: boolean;
+  activeFilterCount?: number;
   hasFilterEdits?: boolean;
-  freezeHeader?: boolean;
-  filterRules?: FilterRule[];
-  appliedFilterCount?: number;
-  onFilterRulesChange?: (rules: FilterRule[]) => void;
-  onFilterChange: (active: boolean, rowCount: number, appliedCount?: number) => void;
+  onClearAllFilters?: () => void;
+  onReapplyFilters?: () => void;
   onError?: (message: string | null) => void;
 }
 
 export function Toolbar({
   tabId,
-  totalCols,
   visible,
-  showFilter,
-  onToggleFilter,
-  onCloseFilter,
   showGoto,
   onToggleGoto,
   onCloseGoto,
   onNavigate,
   onToggleSearch,
-  viewActive: _viewActive,
   filterActive,
+  activeFilterCount = 0,
   hasFilterEdits,
-  freezeHeader,
-  filterRules: filterRulesProp,
-  appliedFilterCount: appliedFilterCountProp,
-  onFilterRulesChange,
-  onFilterChange,
-  onError,
+  onClearAllFilters,
+  onReapplyFilters,
 }: ToolbarProps) {
   const [gotoRow, setGotoRow] = useState("");
   const [gotoCol, setGotoCol] = useState("");
-  const [isFiltering, setIsFiltering] = useState(false);
-
-  const [localRules, setLocalRules] = useState<FilterRule[]>(() => createDefaultFilterRules());
-  const filterRules =
-    filterRulesProp && filterRulesProp.length > 0 ? filterRulesProp : localRules;
-  const appliedCount = appliedFilterCountProp ?? (filterActive ? 1 : 0);
-
-  const isFilterHighlighted = Boolean(filterActive || appliedCount > 0);
-  const displayCount = appliedCount > 0 ? appliedCount : filterActive ? 1 : 0;
 
   useEffect(() => {
     function onDocClick(e: MouseEvent) {
       const target = e.target as HTMLElement | null;
-      if (showFilter && !target?.closest(".filter-popover-anchor")) {
-        onCloseFilter();
-      }
       if (showGoto && !target?.closest(".goto-popover-anchor")) {
         onCloseGoto();
       }
     }
-    if (showFilter || showGoto) {
+    if (showGoto) {
       window.addEventListener("click", onDocClick);
     }
     return () => {
       window.removeEventListener("click", onDocClick);
     };
-  }, [showFilter, showGoto, onCloseFilter, onCloseGoto]);
+  }, [showGoto, onCloseGoto]);
 
   function submitGoto(e: React.FormEvent) {
     e.preventDefault();
@@ -99,45 +64,6 @@ export function Toolbar({
     });
   }
 
-  function applyFilters() {
-    if (isFiltering) return;
-    const activeCriteria = extractActiveCriteria(filterRules);
-
-    setIsFiltering(true);
-    onError?.(null);
-    invoke<number>("set_filters", { tabId, filters: activeCriteria, freezeHeader: freezeHeader ?? true })
-      .then((rowCount) => {
-        setIsFiltering(false);
-        onFilterRulesChange?.(filterRules);
-        onFilterChange(activeCriteria.length > 0, rowCount, activeCriteria.length);
-        onCloseFilter();
-      })
-      .catch((err) => {
-        setIsFiltering(false);
-        const msg = typeof err === "string" ? err : (err?.message || "Failed to apply filter");
-        onError?.(msg);
-      });
-  }
-
-  const reapplyFilters = useCallback(() => {
-    if (isFiltering) return;
-    const activeCriteria = extractActiveCriteria(filterRules);
-
-    setIsFiltering(true);
-    onError?.(null);
-    invoke<number>("set_filters", { tabId, filters: activeCriteria, freezeHeader: freezeHeader ?? true })
-      .then((rowCount) => {
-        setIsFiltering(false);
-        onFilterRulesChange?.(filterRules);
-        onFilterChange(activeCriteria.length > 0, rowCount, activeCriteria.length);
-      })
-      .catch((err) => {
-        setIsFiltering(false);
-        const msg = typeof err === "string" ? err : (err?.message || "Failed to re-apply filter");
-        onError?.(msg);
-      });
-  }, [isFiltering, filterRules, onError, tabId, freezeHeader, onFilterRulesChange, onFilterChange]);
-
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
@@ -145,59 +71,13 @@ export function Toolbar({
       if (mod && !e.altKey && e.shiftKey && e.key.toLowerCase() === "r") {
         if (filterActive && hasFilterEdits) {
           e.preventDefault();
-          reapplyFilters();
+          onReapplyFilters?.();
         }
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [filterActive, hasFilterEdits, reapplyFilters]);
-
-  function clearAllFilters() {
-    if (isFiltering) return;
-    setIsFiltering(true);
-    onError?.(null);
-    invoke<number>("set_filters", { tabId, filters: [], freezeHeader: freezeHeader ?? true })
-      .then((rowCount) => {
-        setIsFiltering(false);
-        const resetRules = createDefaultFilterRules();
-        if (!filterRulesProp) {
-          setLocalRules(resetRules);
-        }
-        onFilterRulesChange?.(resetRules);
-        onFilterChange(false, rowCount, 0);
-        onCloseFilter();
-      })
-      .catch((err) => {
-        setIsFiltering(false);
-        const msg = typeof err === "string" ? err : (err?.message || "Failed to clear filters");
-        onError?.(msg);
-      });
-  }
-
-  function updateRule(id: number, patch: Partial<FilterRule>) {
-    const next = updateFilterRule(filterRules, id, patch);
-    if (!filterRulesProp) {
-      setLocalRules(next);
-    }
-    onFilterRulesChange?.(next);
-  }
-
-  function addRule() {
-    const next = addFilterRule(filterRules);
-    if (!filterRulesProp) {
-      setLocalRules(next);
-    }
-    onFilterRulesChange?.(next);
-  }
-
-  function removeRule(id: number) {
-    const next = removeFilterRule(filterRules, id);
-    if (!filterRulesProp) {
-      setLocalRules(next);
-    }
-    onFilterRulesChange?.(next);
-  }
+  }, [filterActive, hasFilterEdits, onReapplyFilters]);
 
   return (
     <>
@@ -212,251 +92,53 @@ export function Toolbar({
         <IconSearch />
       </button>
 
-      {/* Filter Popover Anchor */}
+      {/* Global Filter Indicator / Clear All */}
       <div style={{ position: "relative" }} className="filter-popover-anchor">
         <button
           className="icon-btn"
           data-action="filter"
-          data-active={showFilter || isFilterHighlighted}
+          data-active={activeFilterCount > 0}
           title={
-            isFilterHighlighted && displayCount > 0
-              ? `Filters (${displayCount} active) (${getToolbarShortcutLabel("filter")})`
-              : `Filters (${getToolbarShortcutLabel("filter")})`
+            activeFilterCount > 0
+              ? `Filters active on ${activeFilterCount} column(s). Click to clear all filters.`
+              : "No column filters active (click funnel on column header to filter)"
           }
-          aria-label={`Filters (${getToolbarShortcutLabel("filter")})`}
-          onClick={onToggleFilter}
+          aria-label={
+            activeFilterCount > 0
+              ? `Filters active on ${activeFilterCount} column(s). Click to clear all filters.`
+              : "No column filters active"
+          }
+          onClick={() => {
+            if (activeFilterCount > 0) {
+              onClearAllFilters?.();
+            }
+          }}
+          style={{ position: "relative" }}
         >
           <IconFilter />
+          {activeFilterCount > 0 && (
+            <span
+              style={{
+                position: "absolute",
+                top: 2,
+                right: 2,
+                background: "var(--primary, #396cd8)",
+                color: "#fff",
+                borderRadius: "50%",
+                width: 13,
+                height: 13,
+                fontSize: 9,
+                fontWeight: 700,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                lineHeight: 1,
+              }}
+            >
+              {activeFilterCount}
+            </span>
+          )}
         </button>
-        {showFilter && (
-          <div
-            style={{
-              position: "absolute",
-              top: "calc(100% + 4px)",
-              right: 0,
-              zIndex: 50,
-              display: "flex",
-              flexDirection: "column",
-              width: 325,
-              maxWidth: "min(345px, calc(100vw - 24px))",
-              background: "var(--bg)",
-              border: "1px solid var(--border)",
-              borderRadius: 6,
-              boxShadow: "0 4px 16px rgba(0,0,0,0.18)",
-              padding: 10,
-              gap: 8,
-              boxSizing: "border-box",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                fontSize: 12,
-                fontWeight: 600,
-              }}
-            >
-              <span>Filter Criteria</span>
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                {isFilterHighlighted && displayCount > 0 && (
-                  <span style={{ fontSize: 11, opacity: 0.7, fontWeight: 400 }}>
-                    {displayCount} active
-                  </span>
-                )}
-                <span style={{ fontSize: 11, opacity: 0.5, fontWeight: 400 }}>
-                  {getToolbarShortcutLabel("filter")}
-                </span>
-              </div>
-            </div>
-
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 6,
-                maxHeight: 220,
-                overflowY: "auto",
-              }}
-            >
-              {filterRules.map((rule, idx) => (
-                <div
-                  key={rule.id}
-                  style={{
-                    display: "flex",
-                    gap: 6,
-                    alignItems: "center",
-                    opacity: rule.enabled ? 1 : 0.55,
-                    transition: "opacity 0.15s ease",
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={rule.enabled}
-                    onChange={(e) => updateRule(rule.id, { enabled: e.target.checked })}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        applyFilters();
-                      }
-                    }}
-                    title={rule.enabled ? "Disable this condition" : "Enable this condition"}
-                    aria-label={rule.enabled ? `Disable condition ${idx + 1}` : `Enable condition ${idx + 1}`}
-                    style={{
-                      cursor: "pointer",
-                      width: 15,
-                      height: 15,
-                      accentColor: "var(--primary, #396cd8)",
-                      flexShrink: 0,
-                      margin: 0,
-                    }}
-                  />
-                  <select
-                    value={rule.col === null ? "all" : String(rule.col)}
-                    onChange={(e) =>
-                      updateRule(rule.id, {
-                        col: e.target.value === "all" ? null : parseInt(e.target.value, 10),
-                      })
-                    }
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        applyFilters();
-                      }
-                    }}
-                    title={!rule.enabled ? "Condition disabled (check box to enable)" : undefined}
-                    style={{
-                      width: 95,
-                      flexShrink: 0,
-                      fontSize: 12,
-                      padding: "3px 4px",
-                      borderRadius: 4,
-                      border: "1px solid var(--border)",
-                      background: "var(--bg)",
-                      color: "var(--fg)",
-                      boxSizing: "border-box",
-                    }}
-                  >
-                    <option value="all">All Columns</option>
-                    {Array.from({ length: totalCols }, (_, c) => (
-                      <option key={c} value={String(c)}>
-                        Col {c + 1}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    // eslint-disable-next-line jsx-a11y/no-autofocus
-                    autoFocus={idx === 0}
-                    placeholder="Contains…"
-                    value={rule.query}
-                    onChange={(e) => updateRule(rule.id, { query: e.target.value })}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        if (e.nativeEvent.isComposing || (e as unknown as { isComposing?: boolean }).isComposing) {
-                          return;
-                        }
-                        e.preventDefault();
-                        applyFilters();
-                      }
-                    }}
-                    title={!rule.enabled ? "Condition disabled (check box to enable)" : undefined}
-                    style={{
-                      flex: 1,
-                      minWidth: 0,
-                      fontSize: 12,
-                      padding: "3px 6px",
-                      borderRadius: 4,
-                      border: "1px solid var(--border)",
-                      background: "var(--bg)",
-                      color: "var(--fg)",
-                      boxSizing: "border-box",
-                    }}
-                  />
-                  {filterRules.length > 1 && (
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      style={{ width: 22, height: 22, fontSize: 14, flexShrink: 0 }}
-                      title="Remove condition"
-                      aria-label={`Remove condition ${idx + 1}`}
-                      onClick={() => removeRule(rule.id)}
-                    >
-                      ×
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginTop: 4,
-                paddingTop: 6,
-                borderTop: "1px solid var(--border)",
-              }}
-            >
-              <button
-                type="button"
-                onClick={addRule}
-                disabled={isFiltering}
-                style={{
-                  fontSize: 12,
-                  padding: "3px 8px",
-                  cursor: isFiltering ? "not-allowed" : "pointer",
-                  opacity: isFiltering ? 0.6 : 1,
-                  background: "transparent",
-                  border: "1px dashed var(--border)",
-                  borderRadius: 4,
-                  color: "var(--fg)",
-                }}
-              >
-                + Add condition
-              </button>
-              <div style={{ display: "flex", gap: 6 }}>
-                {isFilterHighlighted && (
-                  <button
-                    type="button"
-                    disabled={isFiltering}
-                    onClick={clearAllFilters}
-                    style={{
-                      fontSize: 12,
-                      padding: "3px 8px",
-                      cursor: isFiltering ? "not-allowed" : "pointer",
-                      opacity: isFiltering ? 0.6 : 1,
-                      background: "transparent",
-                      border: "1px solid var(--border)",
-                      borderRadius: 4,
-                      color: "var(--danger, #d93025)",
-                    }}
-                  >
-                    Clear
-                  </button>
-                )}
-                <button
-                  type="button"
-                  disabled={isFiltering}
-                  onClick={applyFilters}
-                  style={{
-                    fontSize: 12,
-                    padding: "3px 12px",
-                    cursor: isFiltering ? "not-allowed" : "pointer",
-                    opacity: isFiltering ? 0.7 : 1,
-                    background: "var(--primary, #396cd8)",
-                    color: "#fff",
-                    border: "none",
-                    borderRadius: 4,
-                    fontWeight: 500,
-                  }}
-                >
-                  {isFiltering ? "Applying…" : isFilterHighlighted ? "Re-apply" : "Apply"}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
       {filterActive && (
@@ -464,23 +146,21 @@ export function Toolbar({
           type="button"
           className="icon-btn"
           data-action="reapply-filter"
-          disabled={!hasFilterEdits || isFiltering}
+          disabled={!hasFilterEdits}
           style={{
-            opacity: hasFilterEdits && !isFiltering ? 1 : 0.4,
-            cursor: hasFilterEdits && !isFiltering ? "pointer" : "not-allowed",
-            color: hasFilterEdits && !isFiltering ? "var(--primary, #396cd8)" : undefined,
+            opacity: hasFilterEdits ? 1 : 0.4,
+            cursor: hasFilterEdits ? "pointer" : "not-allowed",
+            color: hasFilterEdits ? "var(--primary, #396cd8)" : undefined,
           }}
           title={
-            isFiltering
-              ? "Applying filter…"
-              : hasFilterEdits
+            hasFilterEdits
               ? `Re-apply filter (${getToolbarShortcutLabel("reapplyFilter")})`
               : "Re-apply filter (no modified cells)"
           }
           aria-label={`Re-apply filter (${getToolbarShortcutLabel("reapplyFilter")})`}
-          onClick={reapplyFilters}
+          onClick={onReapplyFilters}
         >
-          <IconRefresh className={isFiltering ? "spin-icon" : undefined} />
+          <IconRefresh />
         </button>
       )}
 

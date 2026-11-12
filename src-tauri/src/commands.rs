@@ -34,6 +34,7 @@ pub struct OpenFile {
     pub overlay: Overlay,
     pub view: Option<Vec<usize>>,
     pub sort_col: Option<usize>,
+    pub sort_desc: bool,
     pub filters: Vec<crate::search::FilterCriterion>,
     pub freeze_header: bool,
 }
@@ -91,6 +92,7 @@ pub fn open_file(
         overlay: Overlay::new(row_count, col_count),
         view: None,
         sort_col: None,
+        sort_desc: false,
         filters: Vec::new(),
         freeze_header: true,
     });
@@ -159,6 +161,7 @@ fn rebuild_view(open_file: &mut OpenFile) -> Result<(), String> {
         &open_file.index,
         &mut file,
         open_file.sort_col,
+        open_file.sort_desc,
         &open_file.filters,
         open_file.freeze_header,
     );
@@ -171,8 +174,10 @@ pub async fn set_sort(
     col: usize,
     tab_id: TabId,
     freeze_header: Option<bool>,
+    descending: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<usize, String> {
+    let is_desc = descending.unwrap_or(false);
     let (path, index, overlay, filters, freeze) = {
         let mut guard = state.lock().map_err(|e| e.to_string())?;
         let open_file = guard.files.get_mut(&tab_id).ok_or_else(|| "tab not found".to_string())?;
@@ -195,6 +200,7 @@ pub async fn set_sort(
             &index,
             &mut file,
             Some(col),
+            is_desc,
             &filters,
             freeze,
         ))
@@ -205,6 +211,7 @@ pub async fn set_sort(
     let mut guard = state.lock().map_err(|e| e.to_string())?;
     let open_file = guard.files.get_mut(&tab_id).ok_or_else(|| "tab closed while sorting".to_string())?;
     open_file.sort_col = Some(col);
+    open_file.sort_desc = is_desc;
     let count = view.len();
     open_file.view = Some(view);
     Ok(count)
@@ -217,7 +224,7 @@ pub async fn set_filters(
     freeze_header: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<usize, String> {
-    let (path, index, overlay, sort_col, freeze) = {
+    let (path, index, overlay, sort_col, sort_desc, freeze) = {
         let mut guard = state.lock().map_err(|e| e.to_string())?;
         let open_file = guard.files.get_mut(&tab_id).ok_or_else(|| "tab not found".to_string())?;
         if let Some(fh) = freeze_header {
@@ -233,6 +240,7 @@ pub async fn set_filters(
             open_file.index.clone(),
             open_file.overlay.clone(),
             open_file.sort_col,
+            open_file.sort_desc,
             open_file.freeze_header,
         )
     };
@@ -245,6 +253,7 @@ pub async fn set_filters(
             &index,
             &mut file,
             sort_col,
+            sort_desc,
             &filters_clone,
             freeze,
         ))
@@ -261,6 +270,40 @@ pub async fn set_filters(
 }
 
 #[tauri::command]
+pub async fn get_column_distinct_values(
+    col: usize,
+    tab_id: TabId,
+    limit: Option<usize>,
+    state: State<'_, AppState>,
+) -> Result<crate::search::DistinctValuesResult, String> {
+    let (path, index, overlay, freeze) = {
+        let guard = state.lock().map_err(|e| e.to_string())?;
+        let open_file = guard.files.get(&tab_id).ok_or_else(|| "tab not found".to_string())?;
+        (
+            open_file.path.clone(),
+            open_file.index.clone(),
+            open_file.overlay.clone(),
+            open_file.freeze_header,
+        )
+    };
+
+    let limit_val = limit.unwrap_or(1000);
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut file = File::open(&path).map_err(|e| e.to_string())?;
+        Ok(crate::search::get_column_distinct_values_impl(
+            &overlay,
+            &index,
+            &mut file,
+            col,
+            limit_val,
+            freeze,
+        ))
+    })
+    .await
+    .map_err(|e| format!("distinct values extraction failed: {e}"))?
+}
+
+#[tauri::command]
 pub async fn set_filter(
     query: String,
     tab_id: TabId,
@@ -273,6 +316,7 @@ pub async fn set_filter(
         vec![crate::search::FilterCriterion {
             col: None,
             query,
+            ..Default::default()
         }]
     };
     set_filters(filters, tab_id, freeze_header, state).await
@@ -288,6 +332,7 @@ pub async fn clear_sort(tab_id: TabId, state: State<'_, AppState>) -> Result<usi
             let mut guard = state.lock().map_err(|e| e.to_string())?;
             if let Some(f) = guard.files.get_mut(&tab_id) {
                 f.sort_col = None;
+                f.sort_desc = false;
                 f.view = None;
                 return Ok(f.overlay.row_count());
             }
@@ -309,6 +354,7 @@ pub async fn clear_sort(tab_id: TabId, state: State<'_, AppState>) -> Result<usi
             &index,
             &mut file,
             None,
+            false,
             &filters,
             freeze,
         ))
@@ -319,6 +365,7 @@ pub async fn clear_sort(tab_id: TabId, state: State<'_, AppState>) -> Result<usi
     let mut guard = state.lock().map_err(|e| e.to_string())?;
     let open_file = guard.files.get_mut(&tab_id).ok_or_else(|| "tab closed".to_string())?;
     open_file.sort_col = None;
+    open_file.sort_desc = false;
     let count = view.len();
     open_file.view = Some(view);
     Ok(count)
@@ -330,7 +377,7 @@ pub async fn set_freeze_header(
     tab_id: TabId,
     state: State<'_, AppState>,
 ) -> Result<usize, String> {
-    let (path, index, overlay, sort_col, filters) = {
+    let (path, index, overlay, sort_col, sort_desc, filters) = {
         let mut guard = state.lock().map_err(|e| e.to_string())?;
         let open_file = guard.files.get_mut(&tab_id).ok_or_else(|| "tab not found".to_string())?;
         open_file.freeze_header = freeze;
@@ -342,6 +389,7 @@ pub async fn set_freeze_header(
             open_file.index.clone(),
             open_file.overlay.clone(),
             open_file.sort_col,
+            open_file.sort_desc,
             open_file.filters.clone(),
         )
     };
@@ -353,6 +401,7 @@ pub async fn set_freeze_header(
             &index,
             &mut file,
             sort_col,
+            sort_desc,
             &filters,
             freeze,
         ))
@@ -372,6 +421,7 @@ pub fn clear_view(tab_id: TabId, state: State<AppState>) -> Result<(), String> {
     let mut guard = state.lock().map_err(|e| e.to_string())?;
     let open_file = guard.files.get_mut(&tab_id).ok_or_else(|| "tab not found".to_string())?;
     open_file.sort_col = None;
+    open_file.sort_desc = false;
     open_file.filters.clear();
     open_file.view = None;
     Ok(())
@@ -488,6 +538,7 @@ pub fn save_file(dst: Option<String>, tab_id: TabId, state: State<AppState>) -> 
         open_file.overlay = Overlay::new(open_file.index.row_count(), col_count);
         open_file.view = None;
         open_file.sort_col = None;
+        open_file.sort_desc = false;
         open_file.filters.clear();
     }
     Ok(())
@@ -516,6 +567,7 @@ pub fn reload_file_impl(open_file: &mut OpenFile) -> Result<FileMeta, String> {
     open_file.overlay = Overlay::new(row_count, col_count);
     open_file.view = None;
     open_file.sort_col = None;
+    open_file.sort_desc = false;
     open_file.filters.clear();
     open_file.freeze_header = freeze_header;
 
@@ -859,6 +911,7 @@ mod tests {
             overlay: Overlay::new(4, 2),
             view: None,
             sort_col: None,
+            sort_desc: false,
             filters: Vec::new(),
             freeze_header: true,
         };
@@ -879,6 +932,7 @@ mod tests {
             overlay: Overlay::new(2, 2),
             view: None,
             sort_col: None,
+            sort_desc: false,
             filters: Vec::new(),
             freeze_header: true,
         };
@@ -901,6 +955,7 @@ mod tests {
             overlay,
             view: None,
             sort_col: None,
+            sort_desc: false,
             filters: Vec::new(),
             freeze_header: true,
         };
@@ -923,6 +978,7 @@ mod tests {
             overlay: Overlay::new(3, 1),
             view: Some(vec![1, 0, 2]), // pretend a sort already reordered to a,b,c
             sort_col: None,
+            sort_desc: false,
             filters: Vec::new(),
             freeze_header: true,
         };
@@ -963,6 +1019,7 @@ mod tests {
             overlay: Overlay::new(200_000, 27),
             view: None,
             sort_col: None,
+            sort_desc: false,
             filters: Vec::new(),
             freeze_header: true,
         };
@@ -995,6 +1052,7 @@ mod tests {
             overlay: Overlay::new(2, 2),
             view: None,
             sort_col: None,
+            sort_desc: false,
             filters: Vec::new(),
             freeze_header: true,
         });
@@ -1018,6 +1076,7 @@ mod tests {
             overlay: Overlay::new(3, 3),
             view: None,
             sort_col: None,
+            sort_desc: false,
             filters: Vec::new(),
             freeze_header: true,
         };
@@ -1050,6 +1109,7 @@ mod tests {
             // Active view displays row 2 first, then row 0: view = [2, 0]
             view: Some(vec![2, 0]),
             sort_col: None,
+            sort_desc: false,
             filters: Vec::new(),
             freeze_header: true,
         };
@@ -1079,6 +1139,7 @@ mod tests {
             overlay: Overlay::new(3, 2),
             view: Some(vec![2, 1]), // display 0 -> row 2, display 1 -> row 1
             sort_col: None,
+            sort_desc: false,
             filters: Vec::new(),
             freeze_header: true,
         };
@@ -1107,6 +1168,7 @@ mod tests {
             overlay: Overlay::new(2, 2),
             view: None,
             sort_col: None,
+            sort_desc: false,
             filters: Vec::new(),
             freeze_header: true,
         };

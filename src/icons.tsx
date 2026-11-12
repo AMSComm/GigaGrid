@@ -246,9 +246,14 @@ export function IconSparkles({ size = 16 }: { size?: number }) {
   );
 }
 
-export function IconFilter() {
+export function IconFilter({ size, className }: { size?: number; className?: string } = {}) {
   return (
-    <svg {...common}>
+    <svg
+      {...common}
+      width={size ?? common.width}
+      height={size ?? common.height}
+      className={className}
+    >
       <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
     </svg>
   );

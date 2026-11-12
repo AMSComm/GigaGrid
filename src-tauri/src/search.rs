@@ -157,9 +157,307 @@ pub fn compute_replace_cell(
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ConditionType {
+    None,
+    IsEmpty,
+    IsNotEmpty,
+    TextContains,
+    TextNotContains,
+    TextStartsWith,
+    TextEndsWith,
+    TextExactly,
+    GreaterThan,
+    GreaterThanOrEqual,
+    LessThan,
+    LessThanOrEqual,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct FilterCriterion {
     pub col: Option<usize>,
+    #[serde(default)]
     pub query: String,
+    #[serde(default)]
+    pub condition: Option<ConditionType>,
+    #[serde(default)]
+    pub condition_value: Option<String>,
+    #[serde(default)]
+    pub selected_values: Option<Vec<String>>,
+}
+
+impl FilterCriterion {
+    pub fn is_active(&self) -> bool {
+        if !self.query.trim().is_empty() {
+            return true;
+        }
+        if let Some(ref cond) = self.condition {
+            if *cond != ConditionType::None {
+                return true;
+            }
+        }
+        if self.selected_values.is_some() {
+            return true;
+        }
+        false
+    }
+}
+
+pub struct CompiledFilter<'a> {
+    pub orig_col: Option<usize>,
+    pub logical_col: Option<usize>,
+    pub legacy_query_lower: Option<String>,
+    pub condition: Option<ConditionType>,
+    pub condition_val_raw: String,
+    pub condition_val_lower: String,
+    pub condition_val_num: Option<f64>,
+    pub selected_values: Option<std::collections::HashSet<&'a str>>,
+    pub has_blanks_selected: bool,
+}
+
+impl<'a> CompiledFilter<'a> {
+    pub fn matches(&self, cell: &str) -> bool {
+        // 1. Legacy query check (if present)
+        if let Some(ref needle) = self.legacy_query_lower {
+            if !cell.to_lowercase().contains(needle) {
+                return false;
+            }
+        }
+
+        // 2. Condition check
+        if let Some(ref cond) = self.condition {
+            let is_empty = cell.trim().is_empty();
+            let passes = match cond {
+                ConditionType::None => true,
+                ConditionType::IsEmpty => is_empty,
+                ConditionType::IsNotEmpty => !is_empty,
+                ConditionType::TextContains => cell.to_lowercase().contains(&self.condition_val_lower),
+                ConditionType::TextNotContains => !cell.to_lowercase().contains(&self.condition_val_lower),
+                ConditionType::TextStartsWith => cell.to_lowercase().starts_with(&self.condition_val_lower),
+                ConditionType::TextEndsWith => cell.to_lowercase().ends_with(&self.condition_val_lower),
+                ConditionType::TextExactly => cell.eq_ignore_ascii_case(&self.condition_val_raw),
+                ConditionType::GreaterThan => {
+                    if let (Some(cn), Ok(cell_n)) = (self.condition_val_num, cell.trim().parse::<f64>()) {
+                        cell_n > cn
+                    } else {
+                        cell > self.condition_val_raw.as_str()
+                    }
+                }
+                ConditionType::GreaterThanOrEqual => {
+                    if let (Some(cn), Ok(cell_n)) = (self.condition_val_num, cell.trim().parse::<f64>()) {
+                        cell_n >= cn
+                    } else {
+                        cell >= self.condition_val_raw.as_str()
+                    }
+                }
+                ConditionType::LessThan => {
+                    if let (Some(cn), Ok(cell_n)) = (self.condition_val_num, cell.trim().parse::<f64>()) {
+                        cell_n < cn
+                    } else {
+                        cell < self.condition_val_raw.as_str()
+                    }
+                }
+                ConditionType::LessThanOrEqual => {
+                    if let (Some(cn), Ok(cell_n)) = (self.condition_val_num, cell.trim().parse::<f64>()) {
+                        cell_n <= cn
+                    } else {
+                        cell <= self.condition_val_raw.as_str()
+                    }
+                }
+            };
+            if !passes {
+                return false;
+            }
+        }
+
+        // 3. Selected values whitelist check
+        if let Some(ref allowed_set) = self.selected_values {
+            let is_empty = cell.trim().is_empty();
+            let in_set = allowed_set.contains(cell) || (is_empty && self.has_blanks_selected);
+            if !in_set {
+                return false;
+            }
+        }
+
+        true
+    }
+}
+
+fn cmp_values(a: &str, b: &str) -> std::cmp::Ordering {
+    if let (Ok(na), Ok(nb)) = (a.trim().parse::<f64>(), b.trim().parse::<f64>()) {
+        na.partial_cmp(&nb).unwrap_or(std::cmp::Ordering::Equal)
+    } else {
+        a.cmp(b)
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DistinctValuesResult {
+    pub values: Vec<String>,
+    pub total_sampled: usize,
+    pub exceeded_limit: bool,
+}
+
+pub fn get_column_distinct_values_impl(
+    overlay: &Overlay,
+    index: &CsvIndex,
+    file: &mut File,
+    col: usize,
+    limit: usize,
+    freeze_header: bool,
+) -> DistinctValuesResult {
+    let row_count = overlay.row_count();
+    let start_row = if freeze_header && row_count > 0 { 1 } else { 0 };
+    let sample_limit = (start_row + 50_000).min(row_count);
+
+    let mut distinct_set = std::collections::BTreeSet::new();
+    let delimiter = index.delimiter();
+    let encoding = index.encoding();
+    let edited_keys = overlay.edited_row_keys();
+
+    let mut reader_opt = file.try_clone().ok().map(|f| std::io::BufReader::with_capacity(2 * 1024 * 1024, f));
+    let mut curr_pos: u64 = if start_row < row_count {
+        index.row_span(start_row).map(|s| s.0).unwrap_or(0)
+    } else {
+        0
+    };
+    if let Some(ref mut reader) = reader_opt {
+        let _ = reader.seek(std::io::SeekFrom::Start(curr_pos));
+    }
+    let mut buf = Vec::new();
+    let mut sampled_count = 0;
+
+    for r in start_row..sample_limit {
+        sampled_count += 1;
+        let row_key = overlay.get_row_source(r);
+        let is_clean = match row_key {
+            Some(crate::overlay::RowKey::Original(orig_r)) => {
+                !edited_keys.contains(&crate::overlay::RowKey::Original(orig_r))
+            }
+            _ => false,
+        };
+
+        let val_opt = if is_clean {
+            if let (Some(crate::overlay::RowKey::Original(orig_r)), Some(ref mut reader)) =
+                (row_key, &mut reader_opt)
+            {
+                if let Some((start, end)) = index.row_span(orig_r) {
+                    let len = (end - start) as usize;
+                    if start != curr_pos {
+                        let _ = reader.seek(std::io::SeekFrom::Start(start));
+                    }
+                    buf.resize(len, 0);
+                    if reader.read_exact(&mut buf).is_ok() {
+                        curr_pos = end;
+                        let orig_col = overlay.logical_to_orig_col(col);
+                        if let Some(oc) = orig_col {
+                            extract_field_from_raw_line(&buf, delimiter, encoding, oc)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let cell_val = match val_opt {
+            Some(v) => v,
+            None => {
+                curr_pos = 0;
+                overlay
+                    .read_logical_row(index, file, r)
+                    .ok()
+                    .and_then(|row| row.get(col).cloned())
+                    .unwrap_or_default()
+            }
+        };
+
+        let display_val = if cell_val.trim().is_empty() {
+            "(Blanks)".to_string()
+        } else {
+            cell_val
+        };
+
+        distinct_set.insert(display_val);
+        if distinct_set.len() > limit {
+            return DistinctValuesResult {
+                values: Vec::new(),
+                total_sampled: sampled_count,
+                exceeded_limit: true,
+            };
+        }
+    }
+
+    DistinctValuesResult {
+        values: distinct_set.into_iter().collect(),
+        total_sampled: sampled_count,
+        exceeded_limit: false,
+    }
+}
+
+pub fn extract_field_from_raw_line(
+    raw_bytes: &[u8],
+    delimiter: u8,
+    encoding: &'static encoding_rs::Encoding,
+    target_col: usize,
+) -> Option<String> {
+    let mut line = raw_bytes;
+    while matches!(line.last(), Some(b'\n') | Some(b'\r')) {
+        line = &line[..line.len() - 1];
+    }
+    let mut curr_col = 0;
+    let mut in_quotes = false;
+    let mut field_start = 0;
+    let mut i = 0;
+    while i < line.len() {
+        let b = line[i];
+        if in_quotes {
+            if b == b'"' {
+                if i + 1 < line.len() && line[i + 1] == b'"' {
+                    i += 2;
+                    continue;
+                }
+                in_quotes = false;
+            }
+        } else if b == b'"' {
+            in_quotes = true;
+        } else if b == delimiter {
+            if curr_col == target_col {
+                return Some(decode_field_bytes(&line[field_start..i], encoding));
+            }
+            curr_col += 1;
+            field_start = i + 1;
+        }
+        i += 1;
+    }
+    if curr_col == target_col {
+        Some(decode_field_bytes(&line[field_start..], encoding))
+    } else {
+        None
+    }
+}
+
+fn decode_field_bytes(field_bytes: &[u8], encoding: &'static encoding_rs::Encoding) -> String {
+    let mut field = field_bytes;
+    if field.starts_with(b"\"") && field.ends_with(b"\"") && field.len() >= 2 {
+        field = &field[1..field.len() - 1];
+    }
+    let (decoded, _, _) = encoding.decode(field);
+    if decoded.contains('"') {
+        decoded.replace("\"\"", "\"")
+    } else {
+        decoded.into_owned()
+    }
 }
 
 /// Returns LOGICAL row indices in the desired display order/subset — a
@@ -172,15 +470,12 @@ pub fn sorted_filtered_view(
     index: &CsvIndex,
     file: &mut File,
     sort_col: Option<usize>,
+    sort_desc: bool,
     filters: &[FilterCriterion],
     freeze_header: bool,
 ) -> Vec<usize> {
     let row_count = overlay.row_count();
-    let active_filters: Vec<(&FilterCriterion, String)> = filters
-        .iter()
-        .filter(|f| !f.query.trim().is_empty())
-        .map(|f| (f, f.query.to_lowercase()))
-        .collect();
+    let active_criteria: Vec<&FilterCriterion> = filters.iter().filter(|f| f.is_active()).collect();
 
     let (start_row, mut rows) = if freeze_header && row_count > 0 {
         let mut r = Vec::with_capacity(row_count);
@@ -190,9 +485,51 @@ pub fn sorted_filtered_view(
         (0, Vec::with_capacity(row_count))
     };
 
-    if active_filters.is_empty() {
+    if active_criteria.is_empty() {
         rows.extend(start_row..row_count);
     } else {
+        let compiled_filters: Vec<CompiledFilter> = active_criteria
+            .iter()
+            .map(|f| {
+                let orig_col = match f.col {
+                    Some(lc) => overlay.logical_to_orig_col(lc),
+                    None => None,
+                };
+                let legacy_query_lower = if !f.query.trim().is_empty() {
+                    Some(f.query.to_lowercase())
+                } else {
+                    None
+                };
+                let raw_val = f.condition_value.as_deref().unwrap_or("").trim().to_string();
+                let lower_val = raw_val.to_lowercase();
+                let num_val = raw_val.parse::<f64>().ok();
+
+                let mut has_blanks = false;
+                let selected_set = f.selected_values.as_ref().map(|vals| {
+                    let mut s = std::collections::HashSet::with_capacity(vals.len());
+                    for v in vals {
+                        if v == "(Blanks)" || v.is_empty() {
+                            has_blanks = true;
+                        }
+                        s.insert(v.as_str());
+                    }
+                    s
+                });
+
+                CompiledFilter {
+                    orig_col,
+                    logical_col: f.col,
+                    legacy_query_lower,
+                    condition: f.condition.clone(),
+                    condition_val_raw: raw_val,
+                    condition_val_lower: lower_val,
+                    condition_val_num: num_val,
+                    selected_values: selected_set,
+                    has_blanks_selected: has_blanks,
+                }
+            })
+            .collect();
+
         let edited_keys = overlay.edited_row_keys();
         let delimiter = index.delimiter();
         let encoding = index.encoding();
@@ -229,15 +566,8 @@ pub fn sorted_filtered_view(
                         buf.resize(len, 0);
                         if reader.read_exact(&mut buf).is_ok() {
                             curr_pos = end;
-                            let matches = active_filters.iter().all(|(criterion, needle_lower)| {
-                                let orig_col = match criterion.col {
-                                    Some(lc) => match overlay.logical_to_orig_col(lc) {
-                                        Some(c) => Some(c),
-                                        None => return false,
-                                    },
-                                    None => None,
-                                };
-                                raw_line_matches(&buf, delimiter, encoding, orig_col, needle_lower)
+                            let matches = compiled_filters.iter().all(|cf| {
+                                raw_line_matches_compiled(&buf, delimiter, encoding, cf)
                             });
                             if matches {
                                 rows.push(r);
@@ -251,15 +581,13 @@ pub fn sorted_filtered_view(
             // Fallback for edited rows, newly inserted rows, or unbuffered read fallback
             curr_pos = 0;
             if let Ok(row) = overlay.read_logical_row(index, file, r) {
-                let matches = active_filters.iter().all(|(criterion, needle_lower)| {
-                    match criterion.col {
-                        Some(col_idx) => row
-                            .get(col_idx)
-                            .map(|cell| cell.to_lowercase().contains(needle_lower))
-                            .unwrap_or(false),
-                        None => row
-                            .iter()
-                            .any(|cell| cell.to_lowercase().contains(needle_lower)),
+                let matches = compiled_filters.iter().all(|cf| {
+                    match cf.logical_col {
+                        Some(col_idx) => {
+                            let cell = row.get(col_idx).map(|s| s.as_str()).unwrap_or("");
+                            cf.matches(cell)
+                        }
+                        None => row.iter().any(|cell| cf.matches(cell)),
                     }
                 });
                 if matches {
@@ -287,7 +615,11 @@ pub fn sorted_filtered_view(
                 (r, value)
             })
             .collect();
-        keyed.sort_by(|a, b| a.1.cmp(&b.1));
+        if sort_desc {
+            keyed.sort_by(|a, b| cmp_values(&b.1, &a.1));
+        } else {
+            keyed.sort_by(|a, b| cmp_values(&a.1, &b.1));
+        }
         let mut sorted_rows = Vec::with_capacity(rows.len());
         sorted_rows.extend_from_slice(header_slice);
         sorted_rows.extend(keyed.into_iter().map(|(r, _)| r));
@@ -297,19 +629,18 @@ pub fn sorted_filtered_view(
     rows
 }
 
-fn raw_line_matches(
+fn raw_line_matches_compiled(
     raw_bytes: &[u8],
     delimiter: u8,
     encoding: &'static encoding_rs::Encoding,
-    orig_col: Option<usize>,
-    needle_lower: &str,
+    filter: &CompiledFilter,
 ) -> bool {
     let mut line = raw_bytes;
     while matches!(line.last(), Some(b'\n') | Some(b'\r')) {
         line = &line[..line.len() - 1];
     }
 
-    if let Some(target_col) = orig_col {
+    if let Some(target_col) = filter.orig_col {
         let mut curr_col = 0;
         let mut in_quotes = false;
         let mut field_start = 0;
@@ -328,7 +659,8 @@ fn raw_line_matches(
                 in_quotes = true;
             } else if b == delimiter {
                 if curr_col == target_col {
-                    return field_matches(&line[field_start..i], encoding, needle_lower);
+                    let decoded = decode_field_bytes(&line[field_start..i], encoding);
+                    return filter.matches(&decoded);
                 }
                 curr_col += 1;
                 field_start = i + 1;
@@ -336,9 +668,10 @@ fn raw_line_matches(
             i += 1;
         }
         if curr_col == target_col {
-            return field_matches(&line[field_start..], encoding, needle_lower);
+            let decoded = decode_field_bytes(&line[field_start..], encoding);
+            return filter.matches(&decoded);
         }
-        false
+        filter.matches("")
     } else {
         let mut in_quotes = false;
         let mut field_start = 0;
@@ -356,31 +689,16 @@ fn raw_line_matches(
             } else if b == b'"' {
                 in_quotes = true;
             } else if b == delimiter {
-                if field_matches(&line[field_start..i], encoding, needle_lower) {
+                let decoded = decode_field_bytes(&line[field_start..i], encoding);
+                if filter.matches(&decoded) {
                     return true;
                 }
                 field_start = i + 1;
             }
             i += 1;
         }
-        field_matches(&line[field_start..], encoding, needle_lower)
-    }
-}
-
-fn field_matches(
-    field_bytes: &[u8],
-    encoding: &'static encoding_rs::Encoding,
-    needle_lower: &str,
-) -> bool {
-    let mut field = field_bytes;
-    if field.starts_with(b"\"") && field.ends_with(b"\"") && field.len() >= 2 {
-        field = &field[1..field.len() - 1];
-    }
-    let (decoded, _, _) = encoding.decode(field);
-    if decoded.contains('"') {
-        decoded.replace("\"\"", "\"").to_lowercase().contains(needle_lower)
-    } else {
-        decoded.to_lowercase().contains(needle_lower)
+        let decoded = decode_field_bytes(&line[field_start..], encoding);
+        filter.matches(&decoded)
     }
 }
 
@@ -557,12 +875,16 @@ mod tests {
         let index = CsvIndex::build(&path).unwrap();
         let mut file = File::open(&path).unwrap();
         let overlay = overlay_for(3, 2);
-        // With freeze_header: false, all rows sorted: 0="c,3", 1="a,1", 2="b,2" -> a,b,c -> rows 1,2,0
-        let view = sorted_filtered_view(&overlay, &index, &mut file, Some(0), &[], false);
+        // Ascending sort
+        let view = sorted_filtered_view(&overlay, &index, &mut file, Some(0), false, &[], false);
         assert_eq!(view, vec![1, 2, 0]);
 
+        // Descending sort
+        let view_desc = sorted_filtered_view(&overlay, &index, &mut file, Some(0), true, &[], false);
+        assert_eq!(view_desc, vec![0, 2, 1]);
+
         // With freeze_header: true, row 0 stays at index 0, data rows 1..2 sorted -> rows 0,1,2
-        let view_frozen = sorted_filtered_view(&overlay, &index, &mut file, Some(0), &[], true);
+        let view_frozen = sorted_filtered_view(&overlay, &index, &mut file, Some(0), false, &[], true);
         assert_eq!(view_frozen, vec![0, 1, 2]);
         std::fs::remove_file(&path).ok();
     }
@@ -573,13 +895,17 @@ mod tests {
         let index = CsvIndex::build(&path).unwrap();
         let mut file = File::open(&path).unwrap();
         let overlay = overlay_for(3, 2);
-        let filters = vec![FilterCriterion { col: None, query: "av".to_string() }];
+        let filters = vec![FilterCriterion {
+            col: None,
+            query: "av".to_string(),
+            ..Default::default()
+        }];
         // Unpinned: row 2 ("avocado") matches -> [2]
-        let view = sorted_filtered_view(&overlay, &index, &mut file, None, &filters, false);
+        let view = sorted_filtered_view(&overlay, &index, &mut file, None, false, &filters, false);
         assert_eq!(view, vec![2]);
 
         // Pinned: row 0 ("apple") is pinned as header, row 2 ("avocado") matches -> [0, 2]
-        let view_frozen = sorted_filtered_view(&overlay, &index, &mut file, None, &filters, true);
+        let view_frozen = sorted_filtered_view(&overlay, &index, &mut file, None, false, &filters, true);
         assert_eq!(view_frozen, vec![0, 2]);
         std::fs::remove_file(&path).ok();
     }
@@ -591,12 +917,16 @@ mod tests {
         let mut file = File::open(&path).unwrap();
         let overlay = overlay_for(3, 2);
         // Col 0 has names, Col 1 has roles. Filter Col 1 for "developer"
-        let filters = vec![FilterCriterion { col: Some(1), query: "developer".to_string() }];
-        let view = sorted_filtered_view(&overlay, &index, &mut file, None, &filters, false);
+        let filters = vec![FilterCriterion {
+            col: Some(1),
+            query: "developer".to_string(),
+            ..Default::default()
+        }];
+        let view = sorted_filtered_view(&overlay, &index, &mut file, None, false, &filters, false);
         assert_eq!(view, vec![0, 2]);
 
         // With freeze_header: true, row 0 (john) is pinned as header, and data row 2 (bob) matches -> [0, 2]
-        let view_frozen = sorted_filtered_view(&overlay, &index, &mut file, None, &filters, true);
+        let view_frozen = sorted_filtered_view(&overlay, &index, &mut file, None, false, &filters, true);
         assert_eq!(view_frozen, vec![0, 2]);
         std::fs::remove_file(&path).ok();
     }
@@ -609,10 +939,18 @@ mod tests {
         let overlay = overlay_for(3, 3);
         // Role = sales AND Region = east -> only row 0 (alice)
         let filters = vec![
-            FilterCriterion { col: Some(1), query: "sales".to_string() },
-            FilterCriterion { col: Some(2), query: "east".to_string() },
+            FilterCriterion {
+                col: Some(1),
+                query: "sales".to_string(),
+                ..Default::default()
+            },
+            FilterCriterion {
+                col: Some(2),
+                query: "east".to_string(),
+                ..Default::default()
+            },
         ];
-        let view = sorted_filtered_view(&overlay, &index, &mut file, None, &filters, false);
+        let view = sorted_filtered_view(&overlay, &index, &mut file, None, false, &filters, false);
         assert_eq!(view, vec![0]);
         std::fs::remove_file(&path).ok();
     }
@@ -623,8 +961,12 @@ mod tests {
         let index = CsvIndex::build(&path).unwrap();
         let mut file = File::open(&path).unwrap();
         let overlay = overlay_for(3, 1);
-        let filters = vec![FilterCriterion { col: None, query: "banana".to_string() }];
-        let view = sorted_filtered_view(&overlay, &index, &mut file, None, &filters, false);
+        let filters = vec![FilterCriterion {
+            col: None,
+            query: "banana".to_string(),
+            ..Default::default()
+        }];
+        let view = sorted_filtered_view(&overlay, &index, &mut file, None, false, &filters, false);
         assert_eq!(view, vec![1]);
         std::fs::remove_file(&path).ok();
     }
@@ -636,9 +978,86 @@ mod tests {
         let mut file = File::open(&path).unwrap();
         let mut overlay = overlay_for(2, 2);
         overlay.set(0, 0, "a".to_string()); // row 0 was "z", now overlay says "a"
-        let view = sorted_filtered_view(&overlay, &index, &mut file, Some(0), &[], false);
+        let view = sorted_filtered_view(&overlay, &index, &mut file, Some(0), false, &[], false);
         // sorted by overlay-merged col 0: "a" (row 0), "y" (row 1) -> [0, 1]
         assert_eq!(view, vec![0, 1]);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn sorted_filtered_view_condition_filters() {
+        let path = write_temp("view_conditions", "id,score,status\n1,100,active\n2,45,pending\n3,80,\n4,25,active\n");
+        let index = CsvIndex::build(&path).unwrap();
+        let mut file = File::open(&path).unwrap();
+        let overlay = overlay_for(5, 3);
+
+        // Test IsEmpty condition on Col 2 (status): row 3 has empty status
+        let filter_empty = vec![FilterCriterion {
+            col: Some(2),
+            condition: Some(ConditionType::IsEmpty),
+            ..Default::default()
+        }];
+        let view_empty = sorted_filtered_view(&overlay, &index, &mut file, None, false, &filter_empty, true);
+        assert_eq!(view_empty, vec![0, 3]);
+
+        // Test GreaterThan condition on Col 1 (score > 50): rows 1 (100) and 3 (80)
+        let filter_gt = vec![FilterCriterion {
+            col: Some(1),
+            condition: Some(ConditionType::GreaterThan),
+            condition_value: Some("50".to_string()),
+            ..Default::default()
+        }];
+        let view_gt = sorted_filtered_view(&overlay, &index, &mut file, None, false, &filter_gt, true);
+        assert_eq!(view_gt, vec![0, 1, 3]);
+
+        // Test TextStartsWith condition on Col 2 ("act"): rows 1 and 4
+        let filter_sw = vec![FilterCriterion {
+            col: Some(2),
+            condition: Some(ConditionType::TextStartsWith),
+            condition_value: Some("act".to_string()),
+            ..Default::default()
+        }];
+        let view_sw = sorted_filtered_view(&overlay, &index, &mut file, None, false, &filter_sw, true);
+        assert_eq!(view_sw, vec![0, 1, 4]);
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn sorted_filtered_view_selected_values_filter() {
+        let path = write_temp("view_values", "id,category\n1,Fruit\n2,Vegetable\n3,Meat\n4,Fruit\n");
+        let index = CsvIndex::build(&path).unwrap();
+        let mut file = File::open(&path).unwrap();
+        let overlay = overlay_for(5, 2);
+
+        // Select only Fruit and Meat
+        let filter_vals = vec![FilterCriterion {
+            col: Some(1),
+            selected_values: Some(vec!["Fruit".to_string(), "Meat".to_string()]),
+            ..Default::default()
+        }];
+        let view = sorted_filtered_view(&overlay, &index, &mut file, None, false, &filter_vals, true);
+        assert_eq!(view, vec![0, 1, 3, 4]);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn get_column_distinct_values_extracts_correct_set_and_honors_limit() {
+        let path = write_temp("distinct_test", "Header\nA\nB\nA\nC\nB\n");
+        let index = CsvIndex::build(&path).unwrap();
+        let mut file = File::open(&path).unwrap();
+        let overlay = overlay_for(6, 1);
+
+        // Limit 5: should return ["A", "B", "C"]
+        let res = get_column_distinct_values_impl(&overlay, &index, &mut file, 0, 5, true);
+        assert!(!res.exceeded_limit);
+        assert_eq!(res.values, vec!["A".to_string(), "B".to_string(), "C".to_string()]);
+
+        // Limit 2: exceeds limit because unique count is 3
+        let res_exceeded = get_column_distinct_values_impl(&overlay, &index, &mut file, 0, 2, true);
+        assert!(res_exceeded.exceeded_limit);
+        assert!(res_exceeded.values.is_empty());
+
         std::fs::remove_file(&path).ok();
     }
 
@@ -654,11 +1073,12 @@ mod tests {
         let filters = vec![FilterCriterion {
             col: Some(6),
             query: "取引中止".to_string(),
+            ..Default::default()
         }];
-        let view_unpinned = sorted_filtered_view(&overlay, &index, &mut file, None, &filters, false);
+        let view_unpinned = sorted_filtered_view(&overlay, &index, &mut file, None, false, &filters, false);
         assert_eq!(view_unpinned.len(), 56019);
 
-        let view_pinned = sorted_filtered_view(&overlay, &index, &mut file, None, &filters, true);
+        let view_pinned = sorted_filtered_view(&overlay, &index, &mut file, None, false, &filters, true);
         assert_eq!(view_pinned.len(), 56020);
         assert_eq!(view_pinned[0], 0);
     }

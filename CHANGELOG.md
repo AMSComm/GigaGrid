@@ -2,6 +2,25 @@
 
 All notable changes to **Gigagrid** will be documented in this file.
 
+## [v0.5.9] - 2026-11-12
+
+### 🚀 Features & Enhancements
+- **Google Sheets-Style Column Filtering**:
+  - Transformed filtering into an intuitive column-level system matching Google Sheets / Excel UX while preserving high-speed streaming on GB-scale files.
+  - **Column Header Funnel & Context Menu**: Direct funnel icon button on each column header (with active styling when filtered) and right-click context menu action "Filter this column…" on both chrome headers and frozen header rows.
+  - **Block 1: Sort**: Quick one-click `Sort A → Z` and `Sort Z → A` with natural numeric and alphanumeric comparisons.
+  - **Block 2: Filter by Condition**: 11 operator conditions (*Is empty, Is not empty, Text contains, Text does not contain, Text starts with, Text ends with, Text is exactly, Greater than, Greater than or equal, Less than, Less than or equal*).
+  - **Block 3: Filter by Values**:
+    - High-performance Rust streaming scanner retrieves unique column values with search filtering, `Select all` / `Clear` toggles, and dedicated `(Blanks)` handling for empty cells.
+    - **GB-Scale Safeguard**: When a column contains >1,000 distinct values, scanner aborts in <2ms and provides clear UX guidance: *"Over 1,000 unique values. Use filter by condition or search above."*
+  - **Multi-Column Logic**: Strict AND logic across columns and OR logic within selected values of any column.
+  - **Global Toolbar Indicator**: Clean active filter count badge on the toolbar with a 1-click "Clear all filters" button and "Re-apply filter" shortcut (`Cmd+Shift+R`).
+  - **Keyboard Shortcut**: `Cmd+Shift+F` / `Ctrl+Shift+F` instantly opens the column filter popover for the currently focused column.
+- **Isolated Multi-Tab Filter Persistence**:
+  - Saved column filters directly within `Tab` state, guaranteeing filter configurations, filtered row counts, and cached views persist seamlessly when switching tabs.
+
+---
+
 ## [v0.5.8] - 2026-11-11
 
 ### 🐛 Bug Fixes
